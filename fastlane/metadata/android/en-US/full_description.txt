@@ -1,0 +1,15 @@
+<p>ExtMusic is a free and open source music player that plays the YouTube Music catalog without signing in, as well as the music stored on your phone.</p>
+<p><b>Features</b></p>
+<ul>
+<li>YouTube Music search with songs, artists, albums and filters</li>
+<li>Artist and album pages with their catalog</li>
+<li>Autoplay based on YouTube Music radio</li>
+<li>Synced lyrics (LRCLIB, with KuGou as fallback) and local .lrc files</li>
+<li>Downloads for offline listening</li>
+<li>Local music from your phone, with folder filter</li>
+<li>Likes, your own playlists and YouTube playlist import by link</li>
+<li>Editable queue, sleep timer and volume normalization</li>
+<li>Library backup and restore</li>
+<li>Dynamic colors and a liquid glass design</li>
+</ul>
+<p>No Google account, no ads and no tracking: your library is stored only on your phone.</p>

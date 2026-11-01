@@ -1,0 +1,5 @@
+Primera versión pública de ExtMusic.
+• YouTube Music sin cuenta ni anuncios: búsqueda, artistas, álbumes y radio
+• Letras sincronizadas y descargas para escuchar sin conexión
+• Música local del teléfono, playlists propias e importación desde YouTube
+• Colores dinámicos y efecto de vidrio líquido

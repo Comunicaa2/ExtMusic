@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Tema base. windowBackground NEGRO para que el primer frame nativo NO sea
+        blanco (la app es dark-first; en tema Claro hay un brevísimo negro antes de
+        que Compose pinte, mucho menos molesto que un flash blanco). El color real
+        de cada pantalla lo aplica Compose según el tema guardado (Claro/Oscuro/AMOLED).
+    -->
+    <style name="Theme.AuraMusic" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowTranslucentStatus">true</item>
+        <item name="android:windowTranslucentNavigation">true</item>
+    </style>
+
+    <!--
+        Tema de arranque (SplashScreen de AndroidX). Fondo negro y al terminar
+        cambia al tema base. Elimina el flash blanco inicial.
+    -->
+    <style name="Theme.Mambo.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@android:color/black</item>
+        <item name="postSplashScreenTheme">@style/Theme.AuraMusic</item>
+    </style>
+</resources>

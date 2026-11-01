@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Capa de FONDO del icono adaptativo de ExtMusic (derivado de mambo_icon_v7.svg).
+    Degradado caoba oscuro (#33201A -> #190E0B) + glow ámbar radial. A pantalla
+    completa: el lanzador aplica la máscara (esquinas/círculo).
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+
+    <path android:pathData="M0,0h512v512h-512z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="0" android:startY="0"
+                android:endX="512" android:endY="512">
+                <item android:offset="0" android:color="#FF33201A" />
+                <item android:offset="1" android:color="#FF190E0B" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <path android:pathData="M51,262a205,205 0 1,0 410,0a205,205 0 1,0 -410,0z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="256" android:centerY="262"
+                android:gradientRadius="205">
+                <item android:offset="0" android:color="#3DFFA61E" />
+                <item android:offset="1" android:color="#00FFA61E" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>

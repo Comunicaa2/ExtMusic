@@ -1,0 +1,15 @@
+<p>ExtMusic es un reproductor de música libre que reproduce el catálogo de YouTube Music sin iniciar sesión y también la música guardada en el teléfono.</p>
+<p><b>Funciones</b></p>
+<ul>
+<li>Búsqueda en YouTube Music con canciones, artistas, álbumes y filtros</li>
+<li>Páginas de artista y de álbum con su catálogo</li>
+<li>Reproducción automática con la radio de YouTube Music</li>
+<li>Letras sincronizadas (LRCLIB, con KuGou de respaldo) y archivos .lrc locales</li>
+<li>Descargas para escuchar sin conexión</li>
+<li>Música local del teléfono, con filtro por carpeta</li>
+<li>Me gusta, playlists propias e importación de playlists de YouTube por enlace</li>
+<li>Cola editable, temporizador de sueño y normalización de volumen</li>
+<li>Copia de seguridad y restauración de la biblioteca</li>
+<li>Diseño con colores dinámicos y efecto de vidrio líquido</li>
+</ul>
+<p>Sin cuenta de Google, sin anuncios y sin rastreo: la biblioteca se guarda solo en el teléfono.</p>

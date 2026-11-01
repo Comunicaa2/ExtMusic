@@ -1,0 +1,363 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Idioma base de ExtMusic (español). Cada idioma tiene su propio
+    values-xx/strings.xml; Android elige según la configuración del teléfono.
+    REGLA: ningún texto visible se hardcodea en los Composables; todo vive aquí.
+-->
+<resources>
+
+    <!-- ── App ──────────────────────────────────────────────────────────── -->
+    <string name="app_name">ExtMusic</string>
+
+    <!-- ── Navegación inferior ──────────────────────────────────────────── -->
+    <string name="nav_inicio">Inicio</string>
+    <string name="nav_buscar">Buscar</string>
+    <string name="nav_artistas">Artistas</string>
+    <string name="nav_local">Local</string>
+    <string name="nav_biblioteca">Biblioteca</string>
+
+    <!-- ── Acciones comunes ─────────────────────────────────────────────── -->
+    <string name="accion_ajustes">Ajustes</string>
+    <string name="accion_atras">Atrás</string>
+    <string name="accion_reproducir">Reproducir</string>
+    <string name="accion_pausar">Pausar</string>
+    <string name="accion_siguiente">Siguiente</string>
+    <string name="accion_anterior">Anterior</string>
+    <string name="accion_cancelar">Cancelar</string>
+    <string name="accion_cerrar">Cerrar</string>
+    <string name="accion_aceptar">Aceptar</string>
+    <string name="accion_descargar">Descargar</string>
+    <string name="accion_me_gusta">Me gusta</string>
+
+    <!-- ── Inicio ───────────────────────────────────────────────────────── -->
+    <string name="home_recientes">Reproducidos recientemente</string>
+    <string name="home_me_gusta">Me gusta</string>
+    <string name="home_recomendado">Recomendado para ti</string>
+    <string name="home_vacio">Busca una canción para empezar</string>
+    <string name="home_seleccion_rapida">Selección rápida</string>
+    <string name="home_escuchar_de_nuevo">Escuchar de nuevo</string>
+    <string name="home_ver_todo">Ver todo</string>
+    <string name="home_novedades">Novedades de tus artistas</string>
+    <string name="home_mixes">Mixes de tus artistas</string>
+    <string name="home_mix_de">Mix de %1$s</string>
+    <string name="home_mas_para_ti">Más canciones para ti</string>
+    <string name="home_si_te_gusta">Si te gusta %1$s</string>
+    <string name="home_playlists_artistas">Playlists con tus artistas</string>
+    <string name="menu_reproducir_despues">Reproducir a continuación</string>
+    <string name="menu_anadir_cola">Añadir a la cola</string>
+    <string name="menu_ir_artista">Ir al artista</string>
+    <string name="menu_sonara_despues">Sonará a continuación</string>
+    <string name="menu_anadida_cola">Añadida a la cola</string>
+
+    <!-- ── Buscar ───────────────────────────────────────────────────────── -->
+    <string name="buscar_placeholder">Artista, canción, álbum…</string>
+    <string name="buscar_sin_resultados">Sin resultados</string>
+    <string name="buscar_error">No se pudo buscar. Inténtalo de nuevo en un momento.</string>
+    <string name="buscar_canciones">Canciones</string>
+    <string name="buscar_artistas">Artistas</string>
+    <string name="buscar_tipo_artista">Artista • %1$s</string>
+    <string name="tipo_cancion">Canción</string>
+    <!-- Página de artista y de álbum/playlist -->
+    <string name="artista_mas_populares">Más populares</string>
+    <string name="artista_reproducir_todo">Reproducir todo</string>
+    <string name="artista_ver_todas">Ver todas las canciones populares</string>
+    <string name="artista_mix">Mix del artista</string>
+    <string name="artista_reproducir">Reproducir en aleatorio</string>
+    <string name="artista_de_tu_biblioteca">De tu biblioteca</string>
+    <string name="artista_mas_informacion">Más información</string>
+    <string name="artista_leer_mas">Leer más</string>
+    <string name="artista_leer_menos">Leer menos</string>
+    <string name="artista_mostrar_todas">Mostrar todas (%1$d)</string>
+    <string name="artista_mostrar_menos">Mostrar menos</string>
+    <!-- Cola -->
+    <string name="cola_titulo">A continuación</string>
+    <string name="cola_desde">Reproduciendo desde</string>
+    <string name="cola_sonando">Sonando ahora</string>
+    <string name="cola_automatica">Reproducción automática</string>
+    <string name="cola_vacia">No hay más canciones en la cola</string>
+    <string name="cola_quitar">Quitar</string>
+    <string name="cola_arrastrar">Arrastrar para reordenar</string>
+    <string name="cola_quitada">«%1$s» quitada de la cola</string>
+    <string name="cola_deshacer">Deshacer</string>
+    <string name="cola_origen_busqueda">Búsqueda</string>
+    <string name="cola_origen_populares">%1$s · Más populares</string>
+    <string name="rep_automatica">Reproducción automática</string>
+    <string name="rep_automatica_desc">Al terminar la cola, sigue con canciones parecidas</string>
+    <string name="coleccion_descargar">Descargar todo</string>
+    <string name="coleccion_guardar">Guardar como playlist</string>
+    <string name="coleccion_reproducir">Reproducir</string>
+    <string name="coleccion_guardada">Guardada en tu biblioteca como «%1$s»</string>
+    <string name="tipo_video">Video</string>
+    <string name="accion_aleatorio">Aleatorio</string>
+    <string name="accion_mix">Mix</string>
+    <string name="error_cola_vacia">No se pudieron cargar las canciones. Inténtalo de nuevo.</string>
+
+    <!-- ── Biblioteca ───────────────────────────────────────────────────── -->
+    <string name="biblioteca_titulo">Tu biblioteca</string>
+    <string name="biblioteca_musica_dispositivo">Música del dispositivo</string>
+    <string name="biblioteca_me_gusta">Me gusta</string>
+    <string name="biblioteca_descargas">Descargas</string>
+    <string name="biblioteca_playlists">Playlists</string>
+
+    <!-- ── Canciones locales ────────────────────────────────────────────── -->
+    <string name="local_titulo">Música del dispositivo</string>
+    <string name="local_sin_permiso">Necesito permiso para leer la música de tu teléfono</string>
+    <string name="local_conceder_permiso">Conceder permiso</string>
+    <string name="local_vacio">No se encontraron canciones en este dispositivo</string>
+    <string name="local_escaneando">Escaneando…</string>
+
+    <!-- ── Reproductor / letras ─────────────────────────────────────────── -->
+    <string name="player_sin_letras">No hay letras disponibles</string>
+    <string name="player_letras">Letra</string>
+
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <!--  AJUSTES                                                            -->
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <string name="ajustes_titulo">Ajustes</string>
+
+    <!-- Secciones -->
+    <string name="sec_apariencia">Apariencia</string>
+    <string name="sec_interfaz">Interfaz</string>
+    <string name="sec_reproduccion">Reproducción</string>
+    <string name="sec_youtube">YouTube Music</string>
+    <string name="sec_descargas">Descargas</string>
+    <string name="sec_biblioteca_local">Biblioteca local</string>
+    <string name="sec_cache">Caché</string>
+    <string name="sec_letras">Letras</string>
+    <string name="sec_calidad">Calidad de audio</string>
+    <string name="sec_acerca">Acerca de</string>
+    <string name="sec_sonido">Sonido</string>
+    <string name="sec_tus_datos">Tus datos</string>
+    <string name="datos_musica_telefono">Música del teléfono</string>
+    <string name="datos_almacenamiento">Almacenamiento</string>
+    <string name="datos_almacenamiento_uso">Caché: %1$d MB de %2$d MB</string>
+    <string name="datos_almacenamiento_calculando">Calculando…</string>
+    <string name="datos_almacenamiento_explica">Lo que ya escuchaste se guarda un tiempo para no volver a descargarlo. Tus descargas no se tocan.</string>
+
+    <!-- Backup de la biblioteca -->
+    <string name="respaldo_exportar">Exportar backup</string>
+    <string name="respaldo_exportar_desc">Guarda tus me gusta, playlists, historial, cola y ajustes en un archivo comprimido</string>
+    <string name="respaldo_importar">Importar backup</string>
+    <string name="respaldo_importar_desc">Añade los datos de un backup sin borrar los actuales</string>
+    <string name="respaldo_exportado">Backup guardado · Canciones: %1$d · Playlists: %2$d</string>
+    <string name="respaldo_importado">Canciones: %1$d · Playlists: %2$d</string>
+    <string name="respaldo_error">No se pudo completar el backup</string>
+    <string name="respaldo_grande">El backup es demasiado grande para importarlo</string>
+    <string name="respaldo_importado_titulo">Backup importado</string>
+    <string name="respaldo_importado_ajustes">Ajustes restaurados. Si usabas una carpeta de descargas o de música, vuelve a elegirla.</string>
+    <string name="respaldo_importado_cola">Cola restaurada: ya está en el reproductor.</string>
+    <plurals name="respaldo_descartados">
+        <item quantity="one">%1$d elemento no válido se ignoró.</item>
+        <item quantity="other">%1$d elementos no válidos se ignoraron.</item>
+    </plurals>
+    <plurals name="respaldo_por_descargar">
+        <item quantity="one">%1$d canción estaba descargada en el otro teléfono.</item>
+        <item quantity="other">%1$d canciones estaban descargadas en el otro teléfono.</item>
+    </plurals>
+    <string name="respaldo_volver_a_descargar">Volver a descargar</string>
+
+    <!-- Apariencia -->
+    <string name="ajustes_tema">Tema</string>
+    <string name="tema_claro">Claro</string>
+    <string name="tema_oscuro">Oscuro</string>
+    <string name="tema_amoled">AMOLED (negro puro)</string>
+
+    <!-- Interfaz -->
+    <string name="ui_desenfocar">Fondo con el color de la portada</string>
+    <string name="ui_desenfocar_desc">El reproductor, el artista y el álbum se tiñen con el color de la portada (tema oscuro)</string>
+    <string name="ui_liquid_glass">Liquid glass</string>
+    <string name="ui_liquid_glass_desc">Cristal con efecto lupa en el mini reproductor y la barra inferior</string>
+
+    <!-- Reproducción -->
+    <string name="rep_segundo_plano">Seguir sonando al cerrar la app</string>
+    <string name="rep_segundo_plano_desc">Si lo apagas, la música se detiene al quitar la app de recientes</string>
+    <string name="rep_crossfade">Fundido cruzado</string>
+    <string name="rep_crossfade_desc">Mezcla el final de una canción con el inicio de la siguiente</string>
+    <string name="rep_crossfade_valor">%1$d s</string>
+    <string name="rep_crossfade_off">Desactivado</string>
+    <string name="rep_normalizar">Normalizar volumen</string>
+    <string name="rep_normalizar_desc">Sube las canciones flojas y suaviza los picos</string>
+    <string name="rep_ahorro_audio">Ahorro de batería</string>
+    <string name="rep_ahorro_audio_desc">El chip de audio decodifica la música en vez del procesador. Usa AAC (~128 kbps), el formato que admiten más teléfonos. No funciona con Normalizar volumen, Dolby Atmos ni efectos de sonido de otras apps</string>
+    <string name="rep_ahorro_audio_roto">El chip de audio de este teléfono falló desde su última actualización, así que se ahorra batería por otra vía. Apágalo y enciéndelo para reintentar</string>
+    <string name="rep_aleatoria">Barajar al reproducir una lista</string>
+    <string name="rep_aleatoria_desc">La canción que elijas suena primero y el resto en orden aleatorio</string>
+    <string name="rep_ocultar_explicito">Ocultar canciones explícitas</string>
+    <string name="rep_ocultar_explicito_desc">No aparecen en búsquedas, recomendaciones ni listas</string>
+
+    <!-- YouTube Music (códec y precarga aplicados en InnertubeClient / MusicService) -->
+    <string name="yt_datos_moviles">Reproducir con datos móviles</string>
+    <string name="yt_datos_moviles_desc">Permite el streaming fuera del WiFi</string>
+    <string name="yt_codec">Códec de audio</string>
+    <string name="yt_codec_desc">Formato preferido al transmitir</string>
+    <string name="yt_precarga">Precargar siguiente</string>
+    <string name="yt_precarga_desc">Adelanta la siguiente canción de la cola</string>
+    <string name="yt_region">Región</string>
+    <string name="yt_region_desc">País para resultados y tendencias</string>
+    <string name="yt_region_auto">Automática</string>
+    <string name="yt_cache_streams">Cachear streams</string>
+    <string name="yt_cache_streams_desc">Guarda en disco lo ya reproducido para no volver a descargarlo</string>
+    <string name="codec_aac">AAC</string>
+    <string name="codec_opus">Opus</string>
+
+    <!-- Descargas -->
+    <string name="ajustes_calidad_descarga">Calidad de descarga</string>
+    <string name="desc_formato">Formato</string>
+    <string name="desc_formato_desc">Contenedor del archivo descargado</string>
+    <string name="desc_carpeta">Carpeta de descargas</string>
+    <string name="desc_carpeta_desc">Dónde se guardan las canciones</string>
+    <string name="desc_carpeta_predeterminada">Carpeta de la app (predeterminada)</string>
+    <string name="desc_caratula">Incrustar carátula</string>
+    <string name="desc_caratula_desc">Guarda la portada dentro del archivo</string>
+    <string name="desc_letras">Guardar letras</string>
+    <string name="desc_letras_desc">Para verlas sin conexión</string>
+    <string name="desc_solo_wifi">Solo con WiFi</string>
+    <string name="desc_solo_wifi_desc">Las descargas esperan a tener WiFi</string>
+    <string name="desc_al_like">Descargar al dar me gusta</string>
+    <string name="desc_al_like_desc">Cada canción que marques con el corazón se descarga sola</string>
+    <string name="desc_simultaneas">Descargas simultáneas</string>
+    <string name="desc_simultaneas_desc">Cuántas canciones se descargan a la vez</string>
+    <string name="formato_m4a">M4A (AAC)</string>
+    <string name="formato_opus">Opus</string>
+    <string name="formato_mp3">MP3</string>
+
+    <!-- Biblioteca local -->
+    <string name="bib_carpetas">Carpeta de música</string>
+    <string name="bib_carpetas_desc">Dónde buscar tu música local</string>
+    <string name="bib_carpetas_todas">Todo el teléfono</string>
+    <string name="bib_carpetas_usar_todo">Usar todo el teléfono</string>
+    <string name="bib_carpetas_usar_todo_desc">Quita la carpeta elegida</string>
+    <string name="bib_actualizar">Buscar música nueva</string>
+    <string name="bib_actualizar_desc">Vuelve a revisar el teléfono</string>
+    <string name="bib_actualizando">Actualizando biblioteca…</string>
+    <string name="bib_actualizada">Biblioteca actualizada</string>
+
+    <!-- Caché -->
+    <string name="cache_tamano">Espacio máximo</string>
+    <string name="cache_tamano_desc">Límite del audio guardado en disco (se aplica al reiniciar la app)</string>
+    <string name="cache_mb">%1$d MB</string>
+    <string name="cache_limpiar">Liberar espacio</string>
+    <string name="cache_limpiar_desc">Borra el audio guardado temporalmente</string>
+    <string name="cache_limpiada">Espacio liberado</string>
+    <string name="cache_uso_actual">En uso: %1$s</string>
+
+    <!-- Letras -->
+    <string name="letras_mostrar">Mostrar letras</string>
+    <string name="letras_mostrar_desc">Muestra letras sincronizadas en la pantalla de reproducción</string>
+    <string name="letras_auto">Mostrar automáticamente</string>
+    <string name="letras_auto_desc">Abre las letras al empezar la canción</string>
+    <string name="letras_tamano">Tamaño del texto</string>
+    <string name="letras_fuente">Letra de %1$s</string>
+    <string name="letras_no_sincronizada">Letra no sincronizada · %1$s</string>
+    <string name="letras_volver">Volver a la letra</string>
+    <string name="letras_retraso">Sincronía de la letra</string>
+    <string name="letras_retraso_desc">Si la letra va adelantada (p. ej. con auriculares Bluetooth), súbelo</string>
+    <string name="letras_retraso_valor">%1$+.1f s</string>
+    <string name="letras_tamano_desc">Tamaño del texto de las letras</string>
+    <string name="letras_tamano_valor">%1$d</string>
+
+    <!-- Calidad de audio -->
+    <string name="ajustes_calidad_repro">Calidad de streaming</string>
+    <string name="calidad_baja">Ahorro de datos</string>
+    <string name="calidad_media">Normal</string>
+    <string name="calidad_alta">Máxima</string>
+    <string name="calidad_baja_desc">~50 kbps</string>
+    <string name="calidad_media_desc">~128 kbps · AAC</string>
+    <string name="calidad_alta_desc">~160 kbps · Opus</string>
+
+
+    <!-- Acerca de -->
+    <string name="acerca_version">Versión %1$s</string>
+    <string name="acerca_creditos">Créditos</string>
+    <string name="acerca_newpipe">Audio de YouTube Music obtenido con NewPipe Extractor (GPLv3)</string>
+    <string name="acerca_lrclib">Letras proporcionadas por LRCLIB</string>
+    <string name="acerca_kugou">Letras alternativas de KuGou</string>
+
+    <!-- ── Pantallas (Inicio, Buscar, Biblioteca, Artistas, Reproductor) ──── -->
+    <string name="home_buscar_musica">Buscar música</string>
+    <string name="playlist_nueva">Nueva playlist</string>
+    <string name="playlist_borrar_titulo">¿Borrar «%1$s»?</string>
+    <string name="playlist_borrar_texto">La playlist se borrará y no se puede deshacer. Las canciones no se borran.</string>
+    <string name="playlist_borrar">Borrar</string>
+    <!-- Importar playlist de YouTube por enlace -->
+    <string name="importar_titulo">Importar de YouTube</string>
+    <string name="importar_ayuda">Pega el enlace de una playlist o álbum de YouTube o YouTube Music (pública o no listada; las privadas no se pueden). Si ya la importaste, se añaden las canciones nuevas.</string>
+    <string name="importar_accion">Importar</string>
+    <string name="importar_cargando">Importando…</string>
+    <string name="importar_hecho">«%1$s» importada con %2$d canciones</string>
+    <string name="importar_listo">Listo</string>
+    <string name="importar_enlace_malo">Ese enlace no es de una playlist de YouTube</string>
+    <string name="importar_error">No se pudo importar. ¿Es privada o no tienes conexión?</string>
+    <string name="playlist_nombre">Nombre</string>
+    <string name="accion_crear">Crear</string>
+    <string name="biblioteca_musica_dispositivo_desc">Reproduce los archivos guardados en tu teléfono</string>
+    <string name="biblioteca_vacia">Tu biblioteca está vacía</string>
+    <string name="playlist_crear">Crear playlist</string>
+    <string name="artistas_vacio">Escucha canciones para ver artistas</string>
+    <string name="player_error_titulo">No se pudo reproducir</string>
+    <string name="accion_reintentar">Intentar de nuevo</string>
+    <string name="player_reproduciendo_ahora">REPRODUCIENDO AHORA</string>
+    <string name="menu_anadir_playlist">Añadir a playlist</string>
+    <string name="playlist_anadida">Añadida a «%1$s»</string>
+    <string name="playlist_ya_estaba">Ya estaba en «%1$s»</string>
+    <string name="menu_temporizador">Temporizador de sueño</string>
+    <string name="menu_ver_letras">Ver letras</string>
+    <string name="player_sin_reproduccion">Sin reproducción</string>
+    <string name="player_cerrar">Cerrar reproductor</string>
+    <string name="player_mas_opciones">Más opciones</string>
+    <string name="player_me_gusta">Me gusta</string>
+    <string name="player_aleatorio_si">Aleatorio activado</string>
+    <string name="player_aleatorio_no">Aleatorio desactivado</string>
+    <string name="player_anterior">Anterior</string>
+    <string name="player_siguiente">Siguiente</string>
+    <string name="player_pausar">Pausar</string>
+    <string name="player_reproducir">Reproducir</string>
+    <string name="player_repetir_no">Repetir desactivado</string>
+    <string name="player_repetir_todo">Repetir toda la cola</string>
+    <string name="player_repetir_una">Repetir esta canción</string>
+    <string name="player_letra_completa">Ver completa</string>
+    <string name="player_letra_de">Letra de %1$s</string>
+    <string name="player_artista">Artista</string>
+    <string name="descargas_vacio">No hay descargas</string>
+    <string name="playlist_crea_primero">Crea una playlist primero en Biblioteca</string>
+    <string name="playlist_reproducir_orden">Reproducir en orden</string>
+    <string name="playlist_reproducir_aleatorio">Reproducir aleatoriamente</string>
+    <string name="playlist_vacia">Esta playlist está vacía</string>
+    <string name="accion_compartir">Compartir</string>
+    <string name="reordenar">Reordenar</string>
+    <string name="sleep_minutos">%1$d minutos</string>
+    <!-- Temporizador de sueño (AA) -->
+    <string name="sleep_restante">Quedan %1$s</string>
+    <string name="sleep_activar">Activar</string>
+    <string name="sleep_modificar">Modificar</string>
+    <string name="sleep_cancelar_timer">Cancelar temporizador</string>
+    <string name="sleep_notif_titulo">Reproducción pausada por el temporizador</string>
+    <!-- Descargas: estado del botón (X) y notificación (Y) -->
+    <string name="desc_eliminar">Eliminar descarga</string>
+    <string name="desc_descargando">Descargando… %1$d%%</string>
+    <string name="desc_notif_completada">Descarga completada</string>
+    <string name="artista_desconocido">Desconocido</string>
+    <string name="cancion_sin_titulo">Sin título</string>
+
+    <!-- Optimización de batería (Bug D: algunos sistemas matan el servicio en 2º plano) -->
+    <string name="bateria_titulo">Reproducción en segundo plano</string>
+    <string name="bateria_mensaje">Para que la música siga sonando con la app cerrada, permite que ExtMusic funcione en segundo plano.</string>
+    <string name="bateria_permitir">Permitir</string>
+    <string name="bateria_ahora_no">Ahora no</string>
+
+    <!-- Mensajes de error del reproductor -->
+    <string name="error_sin_conexion">Sin conexión a internet</string>
+    <string name="error_http">Error HTTP %1$s</string>
+    <string name="error_formato">Formato de audio no compatible</string>
+    <string name="error_timeout">Tiempo de espera agotado</string>
+    <string name="error_timeout_repro">No se pudo reproducir esta canción (tardó demasiado). Inténtalo de nuevo.</string>
+    <string name="error_reproduccion">Error de reproducción (%1$d)</string>
+    <string name="error_sin_audio">No se pudo obtener el audio.\nPrueba con otra canción.</string>
+
+    <!-- Plural: número de canciones de un artista -->
+    <plurals name="n_canciones">
+        <item quantity="one">%d canción</item>
+        <item quantity="other">%d canciones</item>
+    </plurals>
+
+</resources>

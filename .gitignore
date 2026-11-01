@@ -1,0 +1,28 @@
+# Artefactos de compilación de Gradle / Android
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+local.properties
+
+# Salida de build de cada módulo
+**/build/
+
+# Claves de firma (nunca versionar)
+*.jks
+*.keystore
+
+# Logs
+*.log
+
+# Scripts auxiliares de dev (tunel de descarga)
+tunnel_loop.sh
+
+# Notas internas de desarrollo y archivos del gestor de archivos
+CLAUDE.md
+.directory

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Capa de PRIMER PLANO del icono adaptativo de ExtMusic (de mambo_icon_v7.svg):
+    las dos "orejas" y la onda en forma de M con degradado ámbar->caoba.
+    Va dentro de un group escalado a 0.86 para quedar en la zona segura del
+    icono adaptativo (que el lanzador no recorta con máscaras circulares).
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+
+    <group
+        android:scaleX="0.86"
+        android:scaleY="0.86"
+        android:pivotX="256"
+        android:pivotY="256">
+
+        <!-- Oreja: contorno (mismo ámbar->caoba del cabello) -->
+        <path android:pathData="M168,214 C153,176 149,146 156,120 C172,132 186,172 192,212 C184,218 176,219 168,214 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="100" android:startY="220"
+                    android:endX="412" android:endY="300">
+                    <item android:offset="0" android:color="#FFFFD75C" />
+                    <item android:offset="0.45" android:color="#FFFFA61E" />
+                    <item android:offset="0.8" android:color="#FFC75A2E" />
+                    <item android:offset="1" android:color="#FF8E3B2E" />
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <!-- Oreja: interior insinuado -->
+        <path
+            android:pathData="M168,200 C160,174 159,152 163,134 C172,146 180,174 183,200 C177,204 173,204 168,200 Z"
+            android:fillColor="#8E3B2E"
+            android:fillAlpha="0.35" />
+
+        <!-- Onda en M: trazo grueso redondeado con el degradado del cabello -->
+        <path
+            android:pathData="M104,262 C140,262 145,208 178,208 C213,208 220,326 256,326 C292,326 299,208 334,208 C367,208 372,262 408,262"
+            android:strokeWidth="44"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round">
+            <aapt:attr name="android:strokeColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="100" android:startY="220"
+                    android:endX="412" android:endY="300">
+                    <item android:offset="0" android:color="#FFFFD75C" />
+                    <item android:offset="0.45" android:color="#FFFFA61E" />
+                    <item android:offset="0.8" android:color="#FFC75A2E" />
+                    <item android:offset="1" android:color="#FF8E3B2E" />
+                </gradient>
+            </aapt:attr>
+        </path>
+    </group>
+</vector>
