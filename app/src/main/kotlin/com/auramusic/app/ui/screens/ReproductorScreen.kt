@@ -276,7 +276,7 @@ fun NowPlayingScreen(navController: NavController, playerViewModel: PlayerViewMo
                     Spacer(Modifier.height(4.dp))
                 }
                 item(key = "controles") {
-                    ControlesReproductor(playerViewModel)
+                    ControlesReproductor(playerViewModel, visible)
                     Spacer(Modifier.height(18.dp))
                 }
                 // Asa "A continuación" (como en YT Music): abre la hoja de la cola.
@@ -572,9 +572,12 @@ private fun ProgresoReproductor(vm: PlayerViewModel, posicion: State<Long>) {
 
 // Controles: aleatorio, anterior, play, siguiente, repetir
 @Composable
-private fun ControlesReproductor(vm: PlayerViewModel) {
+private fun ControlesReproductor(vm: PlayerViewModel, visible: Boolean = true) {
     val isPlaying   by vm.isPlaying.collectAsStateWithLifecycle()
-    val isLoading   by vm.isLoading.collectAsStateWithLifecycle()
+    // Oculto, la ruedita no se monta: su animación es infinita y, aunque no se
+    // dibuje, despertaba el hilo principal en cada fotograma (60/s con el Inicio
+    // delante mientras una canción cargaba: ~1,6 s de CPU cada 30 s).
+    val isLoading   = vm.isLoading.collectAsStateWithLifecycle().value && visible
     val aleatorio   by vm.aleatorio.collectAsStateWithLifecycle()
     val modoRepetir by vm.modoRepetir.collectAsStateWithLifecycle()
     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp),

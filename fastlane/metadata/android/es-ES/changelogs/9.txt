@@ -1,0 +1,4 @@
+• Arreglo: si el servidor de audio de tu operador no responde, ExtMusic usa el de reserva en vez de quedarse cargando para siempre
+• Las canciones empiezan antes cuando falla la red (espera de 10 s en vez de 30)
+• Menos consumo: la ruedita de carga ya no trabaja con el reproductor cerrado
+• Cristal líquido más ligero y fluido, con el mismo aspecto

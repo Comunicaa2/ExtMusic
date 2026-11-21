@@ -157,7 +157,9 @@ class MusicService : MediaSessionService() {
         // "Dalvik/…"), para no cambiar lo que recibe googlevideo.
         val httpDataSourceFactory = OkHttpDataSource.Factory(
             OkHttpClient.Builder()
-                .connectTimeout(30, TimeUnit.SECONDS)
+                // Conectar: 10 s (antes 30). Si el servidor de la URL no responde, el
+                // error llega antes a recuperarDeError, que pide otra (con reserva).
+                .connectTimeout(com.auramusic.app.data.api.TIEMPO_CONEXION_AUDIO_S, TimeUnit.SECONDS)
                 .readTimeout(30, TimeUnit.SECONDS)
                 .build()
         ).setUserAgent(System.getProperty("http.agent"))

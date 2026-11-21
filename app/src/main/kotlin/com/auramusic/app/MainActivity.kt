@@ -388,7 +388,8 @@ fun AuraMusicApp(
                 AuraBottomBar(
                     navController = navController,
                     currentDestination = currentDest,
-                    fondoCristal = if (conCristal) fondoCristal else null
+                    fondoCristal = if (conCristal) fondoCristal else null,
+                    medirFondo = !isNowPlaying
                 )
             }
             CapaReproductor(isNowPlaying, navController, playerViewModel, reproductorTapa)
@@ -598,7 +599,10 @@ fun AuraNavRail(
 fun AuraBottomBar(
     navController: androidx.navigation.NavController,
     currentDestination: androidx.navigation.NavDestination?,
-    fondoCristal: Backdrop?
+    fondoCristal: Backdrop?,
+    // False con el reproductor encima: la barra no se ve y medir su fondo cada 2,5 s
+    // (una lectura de GPU de ~5 ms en el hilo principal) no serviría de nada.
+    medirFondo: Boolean = true
 ) {
     // Colores derivados del TEMA (Claro/Oscuro/AMOLED), no fijos.
     val unselected = MaterialTheme.colorScheme.onSurfaceVariant
@@ -620,7 +624,7 @@ fun AuraBottomBar(
     // cristal (Android < 13 o ajuste apagado) la gota es la píldora de color de siempre,
     // con el mismo movimiento.
     val capa = rememberGraphicsLayer()
-    val luminancia = rememberLuminanciaCristal(capa, activa = fondoCristal != null)
+    val luminancia = rememberLuminanciaCristal(capa, activa = fondoCristal != null && medirFondo)
     val oscuro = temaOscuro()
     val n = NAV_ITEMS.size
     val ambito = rememberCoroutineScope()
@@ -688,7 +692,9 @@ fun AuraBottomBar(
                         },
                         highlight = { Highlight.Default.copy(alpha = 0.6f) },
                         shadow = { Shadow(radius = 4.dp, alpha = 0.4f) },
-                        innerShadow = { val p = gota.progresoPulsado; InnerShadow(radius = 8.dp * p, alpha = p) },
+                        // Sin pulsar (p = 0) no hay sombra interior: null hace que Backdrop
+                        // no la dibuje (con radio y opacidad 0 la dibujaba igual).
+                        innerShadow = { val p = gota.progresoPulsado; if (p > 0f) InnerShadow(radius = 8.dp * p, alpha = p) else null },
                         layerBlock = movimientoGota,
                         onDrawSurface = {
                             val claro = ((luminancia.value - 0.3f) / 0.5f).coerceIn(0f, 1f)
@@ -827,9 +833,13 @@ fun MiniPlayer(vm: PlayerViewModel, fondoCristal: Backdrop?, alcance: AnimatedVi
                     progreso = { progreso.value.toFloat() / duration },
                     color = MaterialTheme.colorScheme.primary,
                     colorPista = colorPista,
+                    // Capa propia: el progreso cambia en cada tic (2/s, 10/s con la letra)
+                    // y, sin ella, cada tic volvía a grabar la capa de cristal del mini
+                    // entera (desenfoque, lente y saturación incluidos).
                     modifier = Modifier.align(Alignment.BottomCenter)
                         .padding(horizontal = 32.dp, vertical = 3.dp)
                         .fillMaxWidth().height(2.dp)
+                        .graphicsLayer()
                 )
             }
         }
@@ -838,7 +848,8 @@ fun MiniPlayer(vm: PlayerViewModel, fondoCristal: Backdrop?, alcance: AnimatedVi
     // Cápsula de cristal (o sólida del tema si no hay cristal). Mide su propio fondo para
     // graduar el velo y crece poco al pulsarla, por ser ancha (como en SimpMusic).
     val capa = rememberGraphicsLayer()
-    val luminancia = rememberLuminanciaCristal(capa, activa = fondoCristal != null)
+    // Con el reproductor encima (animar = false) el mini no se ve: no se mide su fondo.
+    val luminancia = rememberLuminanciaCristal(capa, activa = fondoCristal != null && animar)
     Box(
         modificadorMini.capsulaCristal(
             fondo = fondoCristal,

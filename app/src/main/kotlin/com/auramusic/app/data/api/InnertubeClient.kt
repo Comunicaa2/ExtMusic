@@ -523,6 +523,16 @@ class InnertubeClient @Inject constructor() {
         // se comprueba con una petición de 1 byte (~100 ms) antes de devolverla.
         repeat(INTENTOS_AUDIO) { intento ->
             val info = tryNewPipe(videoId, calidad, codec, preferido) ?: return@repeat
+            // Servidor que ya no respondió hace poco: directo a su reserva, sin volver a
+            // esperar los 10 s de conexión en cada canción.
+            if (servidorCaido(info.url)) {
+                val reserva = urlDeReserva(info.url)
+                if (reserva != null && comprobarUrl(reserva) == EstadoUrl.VALIDA) {
+                    val buena = info.copy(url = reserva)
+                    urlsResueltas[clave] = UrlGuardada(buena, caducidadDe(reserva))
+                    return buena
+                }
+            }
             when (comprobarUrl(info.url)) {
                 EstadoUrl.VALIDA -> {
                     Log.d(TAG, "✅ NewPipe (intento ${intento + 1}): ${info.mimeType} ${info.bitrate}kbps")
@@ -531,7 +541,21 @@ class InnertubeClient @Inject constructor() {
                 }
                 // Sin red no tiene sentido reintentar: se devuelve y ExoPlayer/la
                 // descarga reportan el error de conexión como siempre.
-                EstadoUrl.SIN_RED -> return info
+                // "Sin respuesta" también es un servidor caché caído o inalcanzable desde
+                // esta red (visto: los sn-…-aphs del operador no aceptaban conexión desde
+                // un Wi-Fi y la canción se quedaba cargando para siempre). Antes de
+                // rendirse se prueba el de reserva que trae la propia URL (ver urlDeReserva).
+                EstadoUrl.SIN_RED -> {
+                    val reserva = urlDeReserva(info.url)
+                    if (reserva != null) anotarServidorCaido(info.url)
+                    if (reserva != null && comprobarUrl(reserva) == EstadoUrl.VALIDA) {
+                        Log.w(TAG, "Servidor de audio sin respuesta; se usa el de reserva")
+                        val buena = info.copy(url = reserva)
+                        urlsResueltas[clave] = UrlGuardada(buena, caducidadDe(reserva))
+                        return buena
+                    }
+                    return info
+                }
                 EstadoUrl.RECHAZADA -> Log.w(TAG, "URL rechazada (intento ${intento + 1}), reintentando")
             }
         }
@@ -550,8 +574,62 @@ class InnertubeClient @Inject constructor() {
 
     private enum class EstadoUrl { VALIDA, RECHAZADA, SIN_RED }
 
+    /**
+     * Para comprobar URLs de audio (1 byte): espera de conexión corta. Con la de 25 s
+     * del cliente general, un servidor caído congelaba cada intento medio minuto.
+     */
+    private val clienteComprobacion = HttpClient(OkHttp) {
+        engine {
+            config {
+                followRedirects(true)
+                connectTimeout(TIEMPO_CONEXION_AUDIO_S, java.util.concurrent.TimeUnit.SECONDS)
+                readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            }
+        }
+    }
+
+    /**
+     * El servidor de reserva de una URL de googlevideo, como hacen los clientes de
+     * YouTube: `rr{fvip}---{siguiente de mn}.googlevideo.com`, con la misma ruta y
+     * parámetros. `mn` lista los servidores caché que pueden servir el archivo (el
+     * primero es el asignado) y `fvip` es el número que les corresponde. Medido el
+     * 21-nov-2026 en un Wi-Fi de WIN: `rr13---sn-fpoxuuxa-aphs` no conectaba,
+     * `rr3---sn-u1x1x5-5c` respondía en 0,2 s y el redirector devolvía al caído.
+     * Null si la URL no trae reserva.
+     */
+    /** Servidores caché (`sn-…`) que no respondieron, con la hora; se olvidan a los 10 min. */
+    private val servidoresCaidos = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    private fun servidorDe(url: String): String? =
+        runCatching { Uri.parse(url).host }.getOrNull()
+            ?.takeIf { it.endsWith(".googlevideo.com") }
+            ?.substringAfter("---", "")?.substringBefore('.')?.takeIf { it.isNotBlank() }
+
+    private fun anotarServidorCaido(url: String) {
+        servidorDe(url)?.let { servidoresCaidos[it] = System.currentTimeMillis() }
+    }
+
+    private fun servidorCaido(url: String): Boolean {
+        val servidor = servidorDe(url) ?: return false
+        val desde = servidoresCaidos[servidor] ?: return false
+        if (System.currentTimeMillis() - desde < 10 * 60 * 1000L) return true
+        servidoresCaidos.remove(servidor)
+        return false
+    }
+
+    private fun urlDeReserva(url: String): String? {
+        val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return null
+        val host = uri.host ?: return null
+        if (!host.endsWith(".googlevideo.com")) return null
+        val servidores = uri.getQueryParameter("mn")?.split(',')?.filter { it.isNotBlank() } ?: return null
+        val fvip = uri.getQueryParameter("fvip")?.takeIf { it.isNotBlank() } ?: return null
+        val actual = host.substringAfter("---", "").substringBefore('.')
+        val siguiente = servidores.getOrNull(servidores.indexOf(actual) + 1) ?: return null
+        return uri.buildUpon().encodedAuthority("rr$fvip---$siguiente.googlevideo.com").build().toString()
+    }
+
     private suspend fun comprobarUrl(url: String): EstadoUrl = try {
-        val codigo = client.get(url) { header(HttpHeaders.Range, "bytes=0-0") }.status.value
+        val codigo = clienteComprobacion.get(url) { header(HttpHeaders.Range, "bytes=0-0") }.status.value
         if (codigo in 200..299) EstadoUrl.VALIDA else EstadoUrl.RECHAZADA
     } catch (e: CancellationException) {
         throw e
@@ -950,6 +1028,13 @@ data class PaginaColeccion(
 )
 /** Diferencia máxima de duración para dar por buena una letra sincronizada. */
 private const val TOLERANCIA_LETRA_S = 3
+
+/**
+ * Espera máxima para conectar con un servidor de audio (comprobación y reproducción).
+ * Antes eran 25–30 s: con un servidor caído, cada intento dejaba la canción parada
+ * medio minuto. 10 s sobran incluso en redes lentas (la conexión es TCP + TLS).
+ */
+const val TIEMPO_CONEXION_AUDIO_S = 10L
 
 /** Identifica el archivo exacto de YouTube: dos con la misma calidad pueden ser distintos. */
 data class ArchivoAudio(val itag: Int, val clen: Long)

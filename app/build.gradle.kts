@@ -31,8 +31,8 @@ android {
         applicationId = "com.auramusic.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 8
-        versionName = "1.4.0"
+        versionCode = 9
+        versionName = "1.4.1"
 
         // (M2) Se eliminaron YT_CLIENT_ID / YT_CLIENT_SECRET: eran del login de TV
         // antiguo, ningún .kt los usa y quedaban expuestos en el APK. El login nativo

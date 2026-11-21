@@ -1,0 +1,4 @@
+• Fix: if your ISP's audio server doesn't respond, ExtMusic switches to the backup server instead of loading forever
+• Songs start sooner when the network fails (10 s wait instead of 30)
+• Lower usage: the loading spinner no longer works while the player is closed
+• Lighter, smoother liquid glass with the same look
