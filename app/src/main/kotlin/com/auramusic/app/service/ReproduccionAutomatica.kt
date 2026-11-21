@@ -11,6 +11,8 @@ import com.auramusic.app.data.repository.RepositorioPreferencias
 import com.auramusic.app.domain.model.ID_YOUTUBE
 import com.auramusic.app.domain.model.OrigenCancion
 import com.auramusic.app.domain.model.claveCancion
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -22,9 +24,11 @@ import javax.inject.Singleton
  *
  * Vive en el servicio (no en la pantalla): así funciona aunque la app esté
  * cerrada y para cualquier origen del "siguiente".
- *  - Semilla: lo que suena; si su radio no aporta nada nuevo, las 2 anteriores de
- *    ESTA sesión (nunca el historial de otros días).
- *  - Respeta el orden de la radio (de más a menos parecida).
+ *  - Semillas: la primera canción de la cola (ancla, para no alejarse del estilo)
+ *    y lo que suena, a medias; si no aportan nada nuevo, las 2 anteriores de ESTA
+ *    sesión (nunca el historial de otros días).
+ *  - Elige al azar entre las más parecidas de cada radio, máximo 2 por artista, y
+ *    deja para el final lo escuchado estos días (ver [elegir]).
  *  - Excluye lo ya sonado y lo ya en cola, por id Y por canción (otra edición de
  *    la misma canción tiene otro videoId).
  *  - Música del teléfono: no se añade nada; es la música propia del usuario.
@@ -54,31 +58,57 @@ class ReproduccionAutomatica @Inject constructor(
     suspend fun siguientes(actual: MediaItem, cola: List<MediaItem>): List<MediaItem> {
         if (esMusicaDelTelefono(actual)) return emptyList()
         val ocultarExplicito = preferencias.ajustes.first().ocultarExplicito
-        val yaVistas = reproducidas + cola.map { it.mediaId }
-        val clavesVistas = clavesReproducidas + cola.map { clave(it) }
+        // Las marcadas con "No recomendar" (y otras ediciones suyas) nunca entran.
+        val ocultas = songDao.noRecomendadas().first()
+        val yaVistas = reproducidas + cola.map { it.mediaId } + ocultas.map { it.id }
+        val clavesVistas = clavesReproducidas + cola.map { clave(it) } + ocultas.map { claveCancion(it.title, it.artist) }
         fun nuevas(lista: List<SearchItem>) = lista.filter {
             it.isSong && it.videoId.isNotBlank() && it.videoId !in yaVistas &&
                 claveCancion(it.title, it.artist) !in clavesVistas &&
                 !(ocultarExplicito && it.explicit)
         }.distinctBy { claveCancion(it.title, it.artist) }
 
-        val semillas = (listOf(actual) + historial.reversed())
-            .filterNot { esMusicaDelTelefono(it) }
-            .distinctBy { it.mediaId }
-            .take(3)
-        var candidatas = emptyList<SearchItem>()
-        for (semilla in semillas) {
-            val videoId = semilla.mediaId.takeIf { ID_YOUTUBE.matches(it) } ?: continue
-            candidatas = nuevas(runCatching { innertube.relacionadasYtm(videoId) }.getOrDefault(emptyList()))
-            if (candidatas.isNotEmpty()) break
+        // Lo escuchado en los últimos días (también en otras sesiones) va al final.
+        val recientes = songDao.escuchadasDesde(System.currentTimeMillis() - RECIENTE_MS).toHashSet()
+        fun frescas(lista: List<SearchItem>) = lista.filter { it.videoId !in recientes }
+
+        suspend fun radioDe(item: MediaItem): List<SearchItem> {
+            val videoId = item.mediaId.takeIf { ID_YOUTUBE.matches(it) } ?: return emptyList()
+            return nuevas(runCatching { innertube.relacionadasYtm(videoId) }.getOrDefault(emptyList()))
+        }
+
+        // Ancla: la canción con la que empezó la cola (la que eligió el usuario).
+        // Sacando solo de la radio de lo que suena, cada tanda se parece a la
+        // anterior pero la cola se aleja: medido, de "Enter Sandman" a baladas de
+        // los 80 en ~60 canciones. Con media tanda de la radio del ancla, vuelve
+        // una y otra vez al estilo de partida.
+        val ancla = cola.firstOrNull { ID_YOUTUBE.matches(it.mediaId) }
+            ?.takeIf { it.mediaId != actual.mediaId }
+        var fuentes = coroutineScope {
+            val deAncla = async { ancla?.let { radioDe(it) }.orEmpty() }
+            val deActual = async { radioDe(actual) }
+            listOf(deAncla.await(), deActual.await())
+        }.filter { it.isNotEmpty() }
+
+        // Si no aportan nada sin escuchar estos días, se prueban las 2 anteriores de la sesión.
+        if (fuentes.none { frescas(it).isNotEmpty() }) {
+            val otras = historial.reversed()
+                .filterNot { esMusicaDelTelefono(it) || it.mediaId == actual.mediaId || it.mediaId == ancla?.mediaId }
+                .distinctBy { it.mediaId }
+                .take(2)
+            for (semilla in otras) {
+                val radio = radioDe(semilla)
+                if (frescas(radio).isNotEmpty()) { fuentes = listOf(radio); break }
+                if (fuentes.isEmpty() && radio.isNotEmpty()) fuentes = listOf(radio)
+            }
         }
         val artista = actual.mediaMetadata.artist?.toString().orEmpty()
-        if (candidatas.isEmpty() && artista.isNotBlank()) {
+        if (fuentes.isEmpty() && artista.isNotBlank()) {
             val claveArtista = claveCancion("", artista)
-            candidatas = nuevas(runCatching { innertube.search(artista) }.getOrDefault(emptyList()))
-                .filter { claveCancion("", it.artist) == claveArtista }
+            fuentes = listOf(nuevas(runCatching { innertube.search(artista) }.getOrDefault(emptyList()))
+                .filter { claveCancion("", it.artist) == claveArtista })
         }
-        return candidatas.take(10).map { item ->
+        return elegir(fuentes, recientes).map { item ->
             val cancion = SongEntity(
                 id = item.videoId, title = item.title, artist = item.artist,
                 artistId = "", album = "", thumbnailUrl = item.thumbnailUrl, durationMs = 0,
@@ -101,6 +131,44 @@ class ReproduccionAutomatica @Inject constructor(
             .setDurationMs(cancion.durationMs.takeIf { it > 0 })
         if (cancion.thumbnailUrl.isNotBlank()) meta.setArtworkUri(Uri.parse(cancion.thumbnailUrl))
         return MediaItem.Builder().setUri(uri).setMediaId(cancion.id).setMediaMetadata(meta.build()).build()
+    }
+
+    /**
+     * La radio de YouTube (sin cuenta) devuelve casi las mismas 10 primeras cada vez
+     * (medido: 4–8 de 10 repetidas al pedirla de nuevo), y suelen ser los mismos
+     * éxitos para semillas distintas: tomar siempre esas 10 sonaba como una playlist
+     * fija. De cada radio se eligen al azar entre las [VENTANA] más parecidas que no
+     * se hayan escuchado estos días (en el orden de la radio), detrás el resto y al
+     * final las ya escuchadas. Las radios se intercalan y cada artista entra como
+     * mucho [MAX_POR_ARTISTA] veces por tanda: la radio de una canción de KAROL G
+     * es casi toda suya (medido: 9 de 20 seguidas). Si no se llega a [TANDA], se
+     * completa sin ese límite.
+     */
+    private fun elegir(fuentes: List<List<SearchItem>>, recientes: Set<String>): List<SearchItem> {
+        val ordenadas = fuentes.map { radio ->
+            val (frescas, oidas) = radio.partition { it.videoId !in recientes }
+            val orden = radio.withIndex().associate { it.value.videoId to it.index }
+            val alAzar = frescas.take(VENTANA).shuffled().take(TANDA).sortedBy { orden[it.videoId] }
+            alAzar + (frescas - alAzar.toSet()) + oidas
+        }
+        // Intercaladas: 1ª de cada radio, 2ª de cada radio…; sin la misma canción dos veces.
+        val todas = (0 until (ordenadas.maxOfOrNull { it.size } ?: 0))
+            .flatMap { i -> ordenadas.mapNotNull { it.getOrNull(i) } }
+            .distinctBy { claveCancion(it.title, it.artist) }
+        val porArtista = HashMap<String, Int>()
+        val elegidas = todas.filter { item ->
+            val artista = claveCancion("", item.artist)
+            val n = porArtista.getOrDefault(artista, 0)
+            (n < MAX_POR_ARTISTA).also { if (it) porArtista[artista] = n + 1 }
+        }.take(TANDA)
+        return elegidas + (todas - elegidas.toSet()).take(TANDA - elegidas.size)
+    }
+
+    private companion object {
+        const val TANDA = 10
+        const val VENTANA = 25
+        const val MAX_POR_ARTISTA = 2
+        const val RECIENTE_MS = 3L * 24 * 60 * 60 * 1000   // 3 días
     }
 
     private fun clave(item: MediaItem) =

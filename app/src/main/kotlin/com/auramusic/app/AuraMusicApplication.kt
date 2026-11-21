@@ -26,17 +26,24 @@ class AuraMusicApplication : Application(), Configuration.Provider, ImageLoaderF
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder().setWorkerFactory(workerFactory).build()
 
-    // Caché de portadas en disco: carpeta, 2 % del almacenamiento y tope de 250 MB,
-    // como Coil por defecto, pero fijados aquí para que el tope (elegido por el
-    // usuario) no dependa de la versión de Coil. Al llenarse, se van las portadas
-    // que hace más tiempo que no se ven.
+    // Caché de portadas en disco: tope fijo de 50 MB en todos los teléfonos (~500
+    // portadas a 544 px, sin bajar su calidad). Antes eran 250 MB que Ajustes no
+    // mostraba. Al llenarse, se van las portadas que hace más tiempo que no se ven;
+    // una caché mayor de antes se recorta al abrir.
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
         .diskCache {
             DiskCache.Builder()
-                .directory(cacheDir.resolve("image_cache"))
-                .maxSizePercent(0.02)
-                .maximumMaxSizeBytes(250L * 1024 * 1024)
+                .directory(cacheDir.resolve(CARPETA_PORTADAS))
+                .maxSizeBytes(com.auramusic.app.domain.model.CACHE_PORTADAS_MB * 1024 * 1024)
                 .build()
         }
+        // Las portadas que llegan de la red o del disco se funden en 200 ms en vez de
+        // aparecer de golpe. Las que ya están en memoria (volver a una lista, la portada
+        // que vuela al reproductor) salen al instante: Coil no funde las de memoria.
+        .crossfade(200)
         .build()
+
+    companion object {
+        const val CARPETA_PORTADAS = "image_cache"
+    }
 }

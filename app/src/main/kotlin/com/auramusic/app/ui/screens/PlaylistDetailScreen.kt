@@ -36,6 +36,7 @@ import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.auramusic.app.R
 import com.auramusic.app.data.db.SongEntity
+import kotlinx.coroutines.flow.Flow
 import com.auramusic.app.ui.navigation.Screen
 
 /**
@@ -51,14 +52,23 @@ fun PlaylistDetailScreen(playlistId: String, navController: NavController, playe
     // Me gusta / Descargas son playlists automáticas: sus canciones salen de la
     // BD al momento, van por título y no se reordenan.
     val automatica = playlistId == Screen.PlaylistDetail.ME_GUSTA || playlistId == Screen.PlaylistDetail.DESCARGAS
-    val origen = remember(playlistId) {
+    // null = aún cargando: no se muestra "Esta playlist está vacía" mientras tanto
+    // (salía un instante al entrar en cualquier playlist con canciones).
+    val origen: Flow<List<SongEntity>?> = remember(playlistId) {
         when (playlistId) {
             Screen.PlaylistDetail.ME_GUSTA  -> playerViewModel.likedSongs
             Screen.PlaylistDetail.DESCARGAS -> playerViewModel.downloadedSongs
             else -> vm.getPlaylistSongs(playlistId)
         }
     }
-    val cancionesBd by origen.collectAsStateWithLifecycle(emptyList())
+    val cancionesCargadas by origen.collectAsStateWithLifecycle(
+        when (playlistId) {   // las automáticas ya suelen estar cargadas
+            Screen.PlaylistDetail.ME_GUSTA  -> playerViewModel.likedSongs.value
+            Screen.PlaylistDetail.DESCARGAS -> playerViewModel.downloadedSongs.value
+            else -> null
+        })
+    val cargada = cancionesCargadas != null
+    val cancionesBd = cancionesCargadas.orEmpty()
     var nombreBd by remember { mutableStateOf("") }
     LaunchedEffect(playlistId) { if (!automatica) vm.nombrePlaylist(playlistId) { nombreBd = it } }
     val nombre = when (playlistId) {
@@ -131,7 +141,7 @@ fun PlaylistDetailScreen(playlistId: String, navController: NavController, playe
                     }
                 }
             }
-            if (canciones.isEmpty()) {
+            if (cargada && canciones.isEmpty()) {
                 item {
                     Box(Modifier.fillMaxWidth().padding(40.dp), Alignment.Center) {
                         Text(stringResource(R.string.playlist_vacia),

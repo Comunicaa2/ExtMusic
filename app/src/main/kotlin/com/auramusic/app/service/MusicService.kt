@@ -10,11 +10,12 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.media3.common.*
 import androidx.media3.common.util.BitmapLoader
 import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.*
 import androidx.media3.exoplayer.DefaultLoadControl
@@ -25,6 +26,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.auramusic.app.MainActivity
+import com.auramusic.app.data.api.ArchivoAudio
 import com.auramusic.app.data.api.InnertubeClient
 import com.auramusic.app.domain.model.AppSettings
 import com.auramusic.app.domain.model.AudioQuality
@@ -42,6 +44,7 @@ import java.io.File
 import java.io.IOException
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 @AndroidEntryPoint
 class MusicService : MediaSessionService() {
@@ -88,18 +91,26 @@ class MusicService : MediaSessionService() {
         const val PREFS_COLA = "cola_guardada"
 
         private var cache: SimpleCache? = null
+        private var limite: LimiteCacheAudio? = null
 
-        // El límite (Ajustes ▸ Tamaño máximo de caché) se fija al crear la caché:
-        // un cambio se aplica la próxima vez que se inicie la app.
+        // El límite (Ajustes ▸ Almacenamiento) se aplica al momento: ver LimiteCacheAudio.
         fun getOrCreateCache(dir: File, ctx: android.content.Context, maximoMb: Int): SimpleCache {
             if (cache == null) {
+                val evictor = LimiteCacheAudio(maximoMb.toLong() * 1024 * 1024, dir)
+                limite = evictor
                 cache = SimpleCache(
                     File(dir, "audio_cache"),
-                    LeastRecentlyUsedCacheEvictor(maximoMb.toLong() * 1024 * 1024),
+                    evictor,
                     androidx.media3.database.StandaloneDatabaseProvider(ctx)
                 )
             }
             return cache!!
+        }
+
+        /** Cambio del tope desde Ajustes: recorta ya lo que sobre (si la caché está abierta). */
+        fun aplicarLimiteCache(maximoMb: Int) {
+            val abierta = cache ?: return
+            limite?.cambiarMaximo(abierta, maximoMb.toLong() * 1024 * 1024)
         }
         /**
          * Vacía la caché de audio. Si el servicio ya la abrió, se borra con la API
@@ -116,6 +127,7 @@ class MusicService : MediaSessionService() {
             cache?.cacheSpace ?: File(dir, "audio_cache").walkTopDown().filter { it.isFile }.sumOf { it.length() }
 
         private const val META_FORMATO = "aura_formato"
+        private const val MAX_SALTOS_SEGUIDOS = 3
 
         const val CMD_SLEEP_START  = "SLEEP_START"
         const val CMD_SLEEP_CANCEL = "SLEEP_CANCEL"
@@ -134,10 +146,21 @@ class MusicService : MediaSessionService() {
         // IMPORTANTE: Sin headers custom. Las URLs de YouTube CDN (googlevideo.com)
         // y de NewPipe se autentican mediante parámetros en la URL misma.
         // Agregar User-Agent custom o headers extra ROMPE la reproducción.
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-            .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(30_000)
-            .setReadTimeoutMs(30_000)
+        //
+        // OkHttp y no DefaultHttpDataSource: este etiqueta cada conexión para las
+        // estadísticas de datos (TrafficStats) y en sistemas con xt_qtaguid (Android
+        // ≤ 8 y ROMs con kernel viejo) la etiqueta no se quita al cerrarla si el hilo
+        // ya no tiene la suya. El kernel guarda entonces la conexión para siempre,
+        // con lo que quedaba por leer: en un Galaxy J7 se juntaron 112 (28 MB) hasta
+        // dejar el teléfono sin red. OkHttp no etiqueta.
+        // Mismo User-Agent que mandaba DefaultHttpDataSource (el de HttpURLConnection,
+        // "Dalvik/…"), para no cambiar lo que recibe googlevideo.
+        val httpDataSourceFactory = OkHttpDataSource.Factory(
+            OkHttpClient.Builder()
+                .connectTimeout(30, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .build()
+        ).setUserAgent(System.getProperty("http.agent"))
 
         // ── RESOLUCIÓN AL VUELO (Bug B / Bug D) ─────────────────────────────
         // Las pistas de YouTube se encolan con uri "ytstream:VIDEOID". Cuando
@@ -150,10 +173,13 @@ class MusicService : MediaSessionService() {
             if (uri.scheme == ESQUEMA_YT) {
                 val videoId = uri.schemeSpecificPart
                 val ajustes = runBlocking { repositorioPreferencias.ajustes.first() }
-                val (calidad, codec) = formatoPara(videoId, ajustes)
-                val info = runBlocking { innertube.getAudioUrl(videoId, calidad, codec) }
-                    ?: throw IOException("No se pudo resolver el audio de $videoId")
-                recordarFormato(videoId, calidad, codec)
+                val formato = formatoPara(videoId, ajustes)
+                val info = runBlocking {
+                    innertube.getAudioUrl(videoId, formato.calidad, formato.codec, formato.archivo)
+                } ?: throw AudioNoDisponible(videoId)
+                // Nunca se escribe un archivo distinto encima de lo que ya hay guardado.
+                if (cacheEsDeOtroArchivo(videoId, formato.archivo, info.archivo)) throw FormatoCambiado(videoId)
+                recordarFormato(videoId, formato.calidad, formato.codec, info.archivo)
                 Log.d(TAG, "Resuelto $videoId → ${info.mimeType} @ ${info.bitrate}kbps")
                 dataSpec.withUri(Uri.parse(info.url))
             } else dataSpec   // local (file://, content://) o ya resuelto: pasa igual
@@ -195,7 +221,8 @@ class MusicService : MediaSessionService() {
             // teléfono no pueda usar offload (MediaTek con el firmware roto, Dolby activo).
             .experimentalSetDynamicSchedulingEnabled(true)
             .setMediaSourceFactory(DefaultMediaSourceFactory(
-                CacheSoloStreaming.Factory(cacheFactory, DefaultDataSource.Factory(this))))
+                CacheSoloStreaming.Factory(cacheFactory, DefaultDataSource.Factory(this)))
+                .setLoadErrorHandlingPolicy(PoliticaCargaAudio()))
             .setLoadControl(loadControl)
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -291,7 +318,7 @@ class MusicService : MediaSessionService() {
         // auto-reintento. Vive mientras suene la música, con la app abierta o no.
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
-                if (state == Player.STATE_READY) reintentos = 0
+                if (state == Player.STATE_READY) { reintentos = 0; saltosSeguidos = 0 }
                 // Se acabó la cola: sigue con la radio (si no es música del teléfono).
                 if (state == Player.STATE_ENDED && !player.hasNextMediaItem()) extenderCola()
                 // Solo se detiene el servicio si NO queda nada que reproducir; ante
@@ -304,6 +331,7 @@ class MusicService : MediaSessionService() {
             }
             override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
                 reintentos = 0
+                reparadas.clear()
                 anclar(player.currentPosition)
                 guardarPosicion()
                 item?.let { reproduccionAutomatica.registrar(it) }
@@ -330,19 +358,7 @@ class MusicService : MediaSessionService() {
                 // la posición buena es la del reloj, no la que deja esa recuperación.
                 if (reason == Player.DISCONTINUITY_REASON_SEEK) { anclar(player.currentPosition); guardarPosicion() }
             }
-            override fun onPlayerError(error: PlaybackException) {
-                // Bug D: ante un error de red/stream (típico al caducar la URL en
-                // segundo plano) re-prepara hasta 3 veces para pedir una URL nueva.
-                if (reintentos < 3 && esErrorDeRed(error)) {
-                    reintentos++
-                    // La URL guardada (precarga) pudo ser la que falló: que se pida otra.
-                    videoIdDe(player.currentMediaItem)?.let { innertube.olvidarUrl(it) }
-                    Log.w(TAG, "Error ${error.errorCode}; reintento $reintentos (re-preparando)")
-                    player.prepare()
-                } else {
-                    Log.e(TAG, "Error definitivo tras $reintentos reintentos: ${error.errorCode}")
-                }
-            }
+            override fun onPlayerError(error: PlaybackException) = recuperarDeError(error)
         })
 
         // Mantiene en caché el ajuste de reproducción en segundo plano (Fase 2)
@@ -366,6 +382,71 @@ class MusicService : MediaSessionService() {
                 aplicarAhorroAudio(it.ahorroAudio)
             }
         }
+    }
+
+    // ── Recuperación por canción ────────────────────────────────────────────
+    // Una canción con la caché dañada fallaba siempre, incluso tras cerrar la app,
+    // porque la caché sobrevive y nada la borraba. Orden: reparar la caché de esa
+    // canción, reintentar si es un fallo de red y, si sigue sin sonar, pasar a la
+    // siguiente. Si fallan varias seguidas se para y la app muestra el error.
+    private val reparadas = HashSet<String>()
+    private var saltosSeguidos = 0
+
+    private fun recuperarDeError(error: PlaybackException) {
+        val item = player.currentMediaItem
+        val videoId = videoIdDe(item)
+        val enCache = videoId?.let { id ->
+            cache?.getCachedSpans(uriDeVideo(id))?.sumOf { it.length }
+        } ?: 0L
+        val internet = hayInternet()
+        val activa = player.playWhenReady
+        Log.w(TAG, "Fallo en ${videoId ?: item?.mediaId}: código ${error.errorCode}, " +
+            "$enCache bytes en caché, internet=$internet")
+        when {
+            videoId != null && (activa || esFormatoCambiado(error)) && internet && enCache > 0 &&
+                reparadas.add(videoId) -> {
+                Log.w(TAG, "Se vacía la caché de $videoId y se vuelve a cargar")
+                innertube.olvidarUrl(videoId)
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        runCatching { cache?.removeResource(uriDeVideo(videoId)) }
+                    }
+                    if (player.currentMediaItem?.mediaId == item?.mediaId &&
+                        player.playbackState == Player.STATE_IDLE) player.prepare()
+                }
+            }
+            // Bug D: ante un error de red/stream (típico al caducar la URL en
+            // segundo plano) re-prepara hasta 3 veces para pedir una URL nueva. Si
+            // YouTube no dio el audio, basta con un reintento.
+            reintentos < (if (esAudioNoDisponible(error)) 1 else 3) && esErrorDeRed(error) -> {
+                reintentos++
+                // La URL guardada (precarga) pudo ser la que falló: que se pida otra.
+                videoId?.let { innertube.olvidarUrl(it) }
+                Log.w(TAG, "Error ${error.errorCode}; reintento $reintentos (re-preparando)")
+                player.prepare()
+            }
+            activa && internet && saltosSeguidos < MAX_SALTOS_SEGUIDOS &&
+                (player.hasNextMediaItem() || autoplayActivo) -> {
+                saltosSeguidos++
+                Log.w(TAG, "Se salta ${videoId ?: item?.mediaId} ($saltosSeguidos seguidas)")
+                val titulo = item?.mediaMetadata?.title?.toString().orEmpty()
+                if (titulo.isNotBlank()) Toast.makeText(this,
+                    getString(com.auramusic.app.R.string.error_cancion_saltada, titulo), Toast.LENGTH_SHORT).show()
+                if (player.hasNextMediaItem()) {
+                    player.seekToNextMediaItem()
+                    player.prepare()
+                    player.play()
+                } else extenderCola()
+            }
+            else -> Log.e(TAG, "Error definitivo tras $reintentos reintentos: ${error.errorCode}")
+        }
+    }
+
+    private fun hayInternet(): Boolean {
+        val cm = getSystemService(android.net.ConnectivityManager::class.java) ?: return true
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+        return caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
 
     // ── Recordar la cola ────────────────────────────────────────────────────
@@ -503,8 +584,8 @@ class MusicService : MediaSessionService() {
         val videoId = videoIdDe(player.getMediaItemAt(siguiente)) ?: return
         precargaJob?.cancel()
         precargaJob = scope.launch(Dispatchers.IO) {
-            val (calidad, codec) = formatoPara(videoId, repositorioPreferencias.ajustes.first())
-            innertube.getAudioUrl(videoId, calidad, codec)
+            val formato = formatoPara(videoId, repositorioPreferencias.ajustes.first())
+            innertube.getAudioUrl(videoId, formato.calidad, formato.codec, formato.archivo)
         }
     }
 
@@ -514,19 +595,41 @@ class MusicService : MediaSessionService() {
     // de batería, el resto llegaría en otro (AAC) y se mezclarían bytes de dos
     // archivos: ERROR 3003 o saltos. Por eso se recuerda el formato en los
     // metadatos de la caché y, mientras quede algo guardado, se pide ese mismo.
-    private fun formatoPara(videoId: String, ajustes: AppSettings): Pair<AudioQuality, CodecAudio> {
+    // Con la misma calidad YouTube puede dar archivos distintos, así que también se
+    // guarda cuál fue (itag y tamaño). Las entradas antiguas solo traen calidad|códec.
+    private data class FormatoCache(val calidad: AudioQuality, val codec: CodecAudio, val archivo: ArchivoAudio?)
+
+    private fun formatoPara(videoId: String, ajustes: AppSettings): FormatoCache {
         val clave = uriDeVideo(videoId)
         val guardado = cache?.takeIf { it.getCachedSpans(clave).isNotEmpty() }
             ?.getContentMetadata(clave)?.get(META_FORMATO, null as String?)
-            ?.split('|')?.takeIf { it.size == 2 }
-            ?.let { (q, c) -> runCatching { AudioQuality.valueOf(q) to CodecAudio.valueOf(c) }.getOrNull() }
-        return guardado ?: (ajustes.audioQuality to codecDe(ajustes))
+            ?.split('|')?.takeIf { it.size == 2 || it.size == 4 }
+            ?.let { p ->
+                runCatching {
+                    val archivo = if (p.size == 4) ArchivoAudio(p[2].toInt(), p[3].toLong()) else null
+                    FormatoCache(AudioQuality.valueOf(p[0]), CodecAudio.valueOf(p[1]), archivo)
+                }.getOrNull()
+            }
+        return guardado ?: FormatoCache(ajustes.audioQuality, codecDe(ajustes), null)
     }
 
-    private fun recordarFormato(videoId: String, calidad: AudioQuality, codec: CodecAudio) {
+    // Compara lo entregado con lo guardado: por el archivo anotado y, en las entradas
+    // antiguas, por el tamaño total que recuerda la caché.
+    private fun cacheEsDeOtroArchivo(videoId: String, guardado: ArchivoAudio?, nuevo: ArchivoAudio?): Boolean {
+        val abierta = cache ?: return false
+        val clave = uriDeVideo(videoId)
+        if (nuevo == null || abierta.getCachedSpans(clave).isEmpty()) return false
+        if (guardado != null && guardado.itag != nuevo.itag) return true
+        if (guardado != null && guardado.clen > 0 && nuevo.clen > 0 && guardado.clen != nuevo.clen) return true
+        val largo = ContentMetadata.getContentLength(abierta.getContentMetadata(clave))
+        return largo > 0 && nuevo.clen > 0 && largo != nuevo.clen
+    }
+
+    private fun recordarFormato(videoId: String, calidad: AudioQuality, codec: CodecAudio, archivo: ArchivoAudio?) {
+        val valor = "${calidad.name}|${codec.name}" + archivo?.let { "|${it.itag}|${it.clen}" }.orEmpty()
         runCatching {
             cache?.applyContentMetadataMutations(uriDeVideo(videoId),
-                ContentMetadataMutations().set(META_FORMATO, "${calidad.name}|${codec.name}"))
+                ContentMetadataMutations().set(META_FORMATO, valor))
         }.onFailure { Log.w(TAG, "No se pudo guardar el formato de $videoId: ${it.message.sinUrls()}") }
     }
 

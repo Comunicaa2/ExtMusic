@@ -51,7 +51,8 @@ class PlayerViewModel @Inject constructor(
     private val songDao: SongDao,
     private val recommendationRepository: RecommendationRepository,
     private val repositorioPreferencias: RepositorioPreferencias,
-    private val reproduccionAutomatica: ReproduccionAutomatica
+    private val reproduccionAutomatica: ReproduccionAutomatica,
+    private val perfilDao: com.auramusic.app.data.db.PerfilDao
 ) : ViewModel() {
 
     private val TAG = "AuraVM"
@@ -109,8 +110,13 @@ class PlayerViewModel @Inject constructor(
 
     val recentlyPlayed  = songDao.getRecentlyPlayed().ocultandoExplicito()
     val recentesStreaming = songDao.getRecentlyPlayedStreaming().ocultandoExplicito()  // Inicio: solo YouTube (Mejora 12)
-    val likedSongs      = songDao.getLiked().ocultandoExplicito()
-    val downloadedSongs = songDao.getDownloaded().ocultandoExplicito()
+    // StateFlow (null = aún cargando) que guarda la última lista: al volver a
+    // Biblioteca o a una playlist automática se pinta al momento. Como Flow frío,
+    // cada pantalla empezaba vacía y se veía "Tu biblioteca está vacía" un instante.
+    val likedSongs: StateFlow<List<SongEntity>?> = songDao.getLiked().ocultandoExplicito()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    val downloadedSongs: StateFlow<List<SongEntity>?> = songDao.getDownloaded().ocultandoExplicito()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var mediaController: MediaController? = null
@@ -131,6 +137,8 @@ class PlayerViewModel @Inject constructor(
     // (p. ej. no se pudo cargar el Mix); null = reintentar la reproducción.
     private var reintentoPendiente: (() -> Unit)? = null
     private var watchdogJob: Job? = null      // Bug U: corta el "cargando" infinito
+    // Canción pintada sin sonar (cola restaurada en pausa): se cuenta al empezar a sonar.
+    private var reproduccionPendiente: String? = null
 
     // AA: hora (epoch ms) a la que el temporizador pausará, o null si no hay timer.
     val temporizadorActivoHasta = MutableStateFlow<Long?>(null)
@@ -158,6 +166,72 @@ class PlayerViewModel @Inject constructor(
         connectToService()
         loadRecommendations()
         observarLetras()
+        observarPerfil()
+    }
+
+    // ── "No recomendar" (⋮) ─────────────────────────────────────────────────
+    /** Marcadas en el perfil activo: la UI las quita de las sugerencias al momento. */
+    val noRecomendadas: StateFlow<List<SongEntity>> =
+        songDao.noRecomendadas().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** Ids y claves (otras ediciones de la misma canción) de las marcadas. */
+    val clavesNoRecomendadas: StateFlow<Set<String>> = noRecomendadas
+        .map { l -> l.flatMap { listOf(it.id, com.auramusic.app.domain.model.claveCancion(it.title, it.artist)) }.toHashSet() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+    private fun oculta(id: String, titulo: String, artista: String): Boolean {
+        val claves = clavesNoRecomendadas.value
+        return claves.isNotEmpty() &&
+            (id in claves || com.auramusic.app.domain.model.claveCancion(titulo, artista) in claves)
+    }
+
+    /**
+     * Marca o desmarca "No recomendar". Al marcar: sale de lo que viene en la cola y,
+     * si está sonando, se pasa a la siguiente. Me gusta, playlists y descargas no se
+     * tocan. [alTerminar] recibe true si quedó marcada.
+     */
+    fun alternarNoRecomendar(cancion: SongEntity, alTerminar: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            // Una canción que nunca sonó aún no está en la BD: se guarda antes (sin historial).
+            if (songDao.getById(cancion.id) == null)
+                songDao.upsert(cancion.copy(isLiked = false, playCount = 0, lastPlayed = 0, noRecomendar = false))
+            val marcar = !(songDao.getById(cancion.id)?.noRecomendar ?: false)
+            songDao.setNoRecomendar(cancion.id, marcar)
+            currentSong.value?.takeIf { it.id == cancion.id }?.let { currentSong.value = it.copy(noRecomendar = marcar) }
+            if (marcar) quitarDeLoQueViene(cancion)
+            alTerminar(marcar)
+        }
+    }
+
+    private fun quitarDeLoQueViene(c: SongEntity) {
+        val clave = com.auramusic.app.domain.model.claveCancion(c.title, c.artist)
+        recommendations.value = recommendations.value.filter {
+            it.videoId != c.id && com.auramusic.app.domain.model.claveCancion(it.title, it.artist) != clave
+        }
+        val mc = mediaController ?: return
+        for (i in mc.mediaItemCount - 1 downTo mc.currentMediaItemIndex + 1) {
+            val mi = mc.getMediaItemAt(i)
+            val claveItem = com.auramusic.app.domain.model.claveCancion(
+                mi.mediaMetadata.title?.toString().orEmpty(), mi.mediaMetadata.artist?.toString().orEmpty())
+            if (mi.mediaId == c.id || claveItem == clave) mc.removeMediaItem(i)
+        }
+        // La que está puesta: se pasa a la siguiente, pero solo suena si ya sonaba.
+        if (mc.currentMediaItem?.mediaId == c.id) {
+            if (mc.isPlaying) skipNext()
+            else if (mc.hasNextMediaItem()) mc.seekToNextMediaItem()
+        }
+    }
+
+    // Al cambiar de perfil de gusto: sus recomendaciones guardadas y la canción que
+    // suena releída (Me gusta y "No recomendar" son de cada perfil). La música sigue.
+    private fun observarPerfil() {
+        viewModelScope.launch {
+            perfilDao.activo().map { it?.id }.distinctUntilChanged().drop(1).collect {
+                recommendations.value = emptyList()
+                loadRecommendations()
+                currentSong.value?.let { s -> songDao.getById(s.id)?.let { currentSong.value = it } }
+            }
+        }
     }
 
     // Bug I: las letras se cargan aquí, observando currentSong, NO dentro de la
@@ -168,27 +242,58 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             // Se vuelve a pedir al cambiar de canción y, si faltaba, al volver la red.
             var ultimoId: String? = null
+            var letraMejorable = false
             combine(currentSong.map { it?.id }.distinctUntilChanged(), intentoRed) { id, _ -> id }
                 .collectLatest { id ->
                     if (id.isNullOrBlank()) { lyrics.value = null; ultimoId = null; return@collectLatest }
-                    if (id == ultimoId && lyrics.value != null) return@collectLatest   // ya la tiene
+                    // Ya la tiene (salvo un .lrc guardado que aún se puede mejorar con red).
+                    if (id == ultimoId && lyrics.value != null && !letraMejorable) return@collectLatest
+                    // Al reintentar la misma canción no se borra la que ya se ve.
+                    if (id != ultimoId) lyrics.value = null
                     ultimoId = id
-                    lyrics.value = null
+                    letraMejorable = false
                     // D2: si la canción está descargada y tiene .lrc en disco, lee la
-                    // letra LOCAL (offline, sin red) en vez de consultar LRCLIB.
+                    // letra LOCAL (offline, sin red) en vez de consultar LRCLIB. Si no
+                    // es definitiva (sin sincronizar, o guardada antes de elegir por
+                    // duración) se muestra mientras tanto y se busca la buena.
                     val local = DescargaWorker.archivoLetra(context, id)
-                    if (local.exists()) {
-                        val res = runCatching {
-                            innertubeClient.parsearLrcLocal(local.readText())
-                        }.getOrNull()
-                        if (res != null) { lyrics.value = res; return@collectLatest }
+                    val guardada = if (local.exists()) withContext(Dispatchers.IO) {
+                        runCatching { local.readText().let { t -> innertubeClient.parsearLrcLocal(t)?.let { t to it } } }.getOrNull()
+                    } else null
+                    if (guardada != null) {
+                        lyrics.value = guardada.second
+                        if (DescargaWorker.letraDefinitiva(guardada.first, guardada.second)) return@collectLatest
                     }
-                    val s = currentSong.value
-                    if (s == null || s.title.isBlank()) { lyrics.value = null; return@collectLatest }
-                    val seg = (s.durationMs / 1000).toInt()
-                    lyrics.value = runCatching {
+                    // La radio y algunas listas no traen la duración, y sin ella no se
+                    // puede elegir la versión correcta de la letra: se espera a la real
+                    // (guardarDuracion la pone al cargar el audio), como mucho 10 s.
+                    val s = currentSong.value?.takeIf { it.id != id || it.durationMs > 0 }
+                        ?: withTimeoutOrNull(10_000) { currentSong.first { it?.id != id || (it?.durationMs ?: 0L) > 0 } }
+                        ?: currentSong.value
+                    if (s == null || s.id != id || s.title.isBlank()) {
+                        if (guardada == null) lyrics.value = null
+                        return@collectLatest
+                    }
+                    val seg = ((s.durationMs + 500) / 1000).toInt()
+                    val nueva = runCatching {
                         innertubeClient.getLyrics(s.title, s.artist, seg)
                     }.getOrNull()
+                    when {
+                        guardada == null -> lyrics.value = nueva
+                        // Sin red, o la red no tiene nada mejor: se queda la guardada
+                        // (una sin sincronizar no sustituye a una sincronizada).
+                        nueva == null || !nueva.isSynced -> letraMejorable = true
+                        else -> {
+                            lyrics.value = nueva
+                            // Elegida con la duración real: reemplaza la del .lrc para
+                            // que también sirva sin conexión.
+                            if (seg > 0 && local.exists()) withContext(Dispatchers.IO) {
+                                runCatching { DescargaWorker.guardarLetra(local, nueva, seg) }
+                            }
+                        }
+                    }
+                    Log.d(TAG, "Letra de $id (${seg}s): ${lyrics.value?.source}, sincronizada=${lyrics.value?.isSynced}, " +
+                        "primera línea ${lyrics.value?.lines?.firstOrNull { it.text.isNotBlank() }?.timeMs} ms")
                 }
         }
     }
@@ -233,6 +338,12 @@ class PlayerViewModel @Inject constructor(
             override fun onIsPlayingChanged(playing: Boolean) {
                 isPlaying.value = playing
                 if (playing) { cancelarWatchdog(); startTick() } else stopTick()
+                // La canción que se pintó en pausa (cola restaurada) cuenta al sonar.
+                val pendiente = reproduccionPendiente
+                if (playing && pendiente != null && pendiente == mc.currentMediaItem?.mediaId) {
+                    reproduccionPendiente = null
+                    viewModelScope.launch { songDao.incrementPlayCount(pendiente) }
+                }
             }
             // Cada vez que ExoPlayer pasa de pista (manual o automático) pintamos
             // la canción actual desde su mediaId. Es el ÚNICO lugar donde cambia
@@ -253,7 +364,12 @@ class PlayerViewModel @Inject constructor(
                 durationMs.value = mediaController?.duration?.coerceAtLeast(0L) ?: 0L
                 val id = item?.mediaId
                 if (item == null || id.isNullOrBlank()) { currentSong.value = null; return }
-                pintarCancion(id, item)
+                // Solo cuenta como escuchada si suena: restaurar la cola (al abrir la
+                // app o al importar un backup) la pone en pausa y no debe entrar en el
+                // historial del perfil activo. Si no suena aún, cuenta al empezar.
+                val sonando = mc.isPlaying
+                reproduccionPendiente = if (sonando) null else id
+                pintarCancion(id, item, contar = sonando)
             }
             override fun onPlaybackStateChanged(state: Int) {
                 val mc2 = mediaController ?: return
@@ -316,7 +432,7 @@ class PlayerViewModel @Inject constructor(
     }
 
     // Pinta currentSong + letras + badge a partir del id de la pista que empezó.
-    private fun pintarCancion(id: String, item: MediaItem) {
+    private fun pintarCancion(id: String, item: MediaItem, contar: Boolean) {
         viewModelScope.launch {
             errorMessage.value = null
             val deCola = colaActual.find { it.id == id }
@@ -334,7 +450,7 @@ class PlayerViewModel @Inject constructor(
             precargarPortadaSiguiente()
             // Registra la canción nueva (de YouTube) si aún no estaba en BD.
             if (guardada == null && deCola != null && deCola.title.isNotBlank()) songDao.upsert(deCola)
-            songDao.incrementPlayCount(id)
+            if (contar) songDao.incrementPlayCount(id)
 
             // Badge de calidad: aprox. por la calidad descargada o por la preferencia.
             qualityBadge.value =
@@ -534,7 +650,9 @@ class PlayerViewModel @Inject constructor(
         cargandoListaYtm.value = lista.playlistId
         viewModelScope.launch {
             try {
-                val canciones = innertubeClient.colaDePlaylist(lista).filter { it.isSong }
+                // Mix y Aleatorio: sin las marcadas con "No recomendar".
+                val canciones = innertubeClient.colaDePlaylist(lista)
+                    .filter { it.isSong && !oculta(it.videoId, it.title, it.artist) }
                 if (canciones.isEmpty()) {
                     reintentoPendiente = { reproducirListaYtm(lista, origen, onLista) }
                     errorMessage.value = context.getString(R.string.error_cola_vacia)
@@ -882,6 +1000,22 @@ class PlayerViewModel @Inject constructor(
         androidx.work.WorkManager.getInstance(context).enqueueUniqueWork(
             DescargaWorker.nombreUnico(s.id), androidx.work.ExistingWorkPolicy.KEEP, req
         )
+    }
+
+    /**
+     * Deslizar para actualizar el Inicio: recomendaciones nuevas al momento (y se
+     * guardan). Corre en el ViewModel para que salir de la pantalla no las corte.
+     * Devuelve false si no llegó nada (sin red): entonces se queda la lista actual.
+     */
+    fun actualizarRecomendaciones(): Deferred<Boolean> = viewModelScope.async {
+        val actuales = recommendations.value.map { it.videoId }.toSet()
+        val recs = runCatching { recommendationRepository.getRecommendations(variar = true, evitar = actuales) }
+            .onFailure { if (it is CancellationException) throw it; Log.w(TAG, "Actualizar: ${it.message.sinUrls()}") }
+            .getOrDefault(emptyList())
+        if (recs.isEmpty()) return@async false
+        val ocultar = repositorioPreferencias.ajustes.first().ocultarExplicito
+        recommendations.value = if (ocultar) recs.filter { !it.explicit } else recs
+        true
     }
 
     private fun loadRecommendations() {

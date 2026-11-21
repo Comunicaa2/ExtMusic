@@ -102,17 +102,22 @@ fun CancionesLocalesScreen(navController: NavController, playerViewModel: Player
                         )
                     } else {
                         LazyColumn(contentPadding = PaddingValues(bottom = 160.dp)) {
-                            item {
+                            item(key = "titulo") {
                                 SectionTitle(
                                     pluralStringResource(R.plurals.n_canciones, e.canciones.size, e.canciones.size),
-                                    Modifier.padding(horizontal = 16.dp)
+                                    Modifier.padding(horizontal = 16.dp).animateItem()
                                 )
                             }
-                            itemsIndexed(e.canciones) { index, cancion ->
-                                SongRow(song = cancion, onPlay = {
-                                    playerViewModel.reproducirCola(e.canciones, index, origenLocal)
-                                    playerViewModel.abrirReproductor()
-                                })
+                            // Con clave (el id es la URI de MediaStore, única) y animateItem, como
+                            // las demás listas: al reescanear, las filas nuevas se funden y las
+                            // que cambian de sitio se deslizan en vez de saltar.
+                            itemsIndexed(e.canciones, key = { _, c -> c.id }, contentType = { _, _ -> "cancion" }) { index, cancion ->
+                                Box(Modifier.animateItem()) {
+                                    SongRow(song = cancion, onPlay = {
+                                        playerViewModel.reproducirCola(e.canciones, index, origenLocal)
+                                        playerViewModel.abrirReproductor()
+                                    })
+                                }
                             }
                         }
                     }

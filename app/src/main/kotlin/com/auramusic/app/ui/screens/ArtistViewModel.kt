@@ -40,7 +40,7 @@ class ArtistViewModel @Inject constructor(
 
     /** "De tu biblioteca": canciones guardadas de este artista (por su id o su nombre). */
     val deTuBiblioteca: StateFlow<List<SongEntity>> =
-        combine(songDao.getAll(), nombre, idPagina) { todas, n, id ->
+        combine(songDao.delPerfil(), nombre, idPagina) { todas, n, id ->
             if (n.isBlank()) emptyList()
             else todas.filter { c ->
                 (id != null && c.artistId == id) || extractMainArtist(c.artist).equals(n, ignoreCase = true)

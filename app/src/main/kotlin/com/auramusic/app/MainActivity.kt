@@ -30,6 +30,8 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.stringResource
@@ -64,10 +66,33 @@ import com.auramusic.app.ui.theme.portadaCompartida
 import com.auramusic.app.ui.components.IconoPlayPausa
 import com.auramusic.app.ui.screens.NowPlayingScreen
 import com.auramusic.app.ui.theme.LocalAlcanceReproductor
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
+import androidx.activity.BackEventCompat
+import com.auramusic.app.ui.theme.encogerConGesto
+import kotlinx.coroutines.launch
 import com.auramusic.app.ui.theme.LocalTransicionCompartida
+import com.auramusic.app.ui.theme.sinAnimacion
 import com.auramusic.app.ui.theme.capsulaCristal
 import com.auramusic.app.ui.theme.cristalDisponible
+import com.auramusic.app.ui.theme.ALTO_GOTA
+import com.auramusic.app.ui.theme.GotaPestana
+import com.auramusic.app.ui.theme.rememberLuminanciaCristal
+import com.auramusic.app.ui.theme.temaOscuro
+import androidx.compose.ui.graphics.GraphicsLayerScope
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.util.lerp
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.colorControls
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
+import com.kyant.backdrop.highlight.Highlight
+import com.kyant.backdrop.shadow.InnerShadow
+import com.kyant.backdrop.shadow.Shadow
+import com.kyant.shapes.Capsule
+import kotlin.math.roundToInt
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -178,7 +203,10 @@ fun AuraMusicApp(
     val currentDest = navBackStack?.destination
     // El reproductor es una capa encima de la navegación (ver CapaReproductor).
     val isNowPlaying by playerViewModel.reproductorAbierto.collectAsStateWithLifecycle()
-    val currentSong by playerViewModel.currentSong.collectAsStateWithLifecycle()
+    // Aquí solo importa si hay canción: leer la canción entera rehacía la raíz de la
+    // app en cada cambio de canción o "me gusta".
+    val cancionActual = playerViewModel.currentSong.collectAsStateWithLifecycle()
+    val haySong by remember { derivedStateOf { cancionActual.value != null } }
 
     // Bug E: diálogo de error GLOBAL. Al ser un Dialog se dibuja en su propia
     // ventana, SIEMPRE encima de todo y en cualquier pantalla (ya no queda detrás
@@ -250,14 +278,17 @@ fun AuraMusicApp(
         )
     }
 
-    // Escena de la portada que vuela (mini ↔ reproductor): abarca el contenido y la
-    // capa del mini reproductor para que la portada pueda pasar de uno a otro.
-    SharedTransitionLayout {
-    CompositionLocalProvider(LocalTransicionCompartida provides this) {
+    // true con el reproductor abierto y quieto: lo de debajo no se ve (ver noDibujarSi).
+    val reproductorTapa = remember { mutableStateOf(false) }
+
     if (ventanaExpandida) {
         // Fix 3: pantallas anchas (tablets / horizontal) → NavigationRail vertical a
         // la izquierda + contenido a la derecha; el mini player va abajo del contenido.
         // El rail y el mini player se ocultan al abrir Now Playing (pantalla completa).
+        // Aquí el mini va en la columna del contenido, así que la escena de la portada
+        // que vuela (mini ↔ reproductor) abarca todo.
+        SharedTransitionLayout {
+        CompositionLocalProvider(LocalTransicionCompartida provides this) {
         Box(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
             AnimatedVisibility(
@@ -268,11 +299,11 @@ fun AuraMusicApp(
                 AuraNavRail(navController = navController, currentDestination = currentDest)
             }
             Column(Modifier.weight(1f).fillMaxHeight()) {
-                Box(Modifier.weight(1f).fillMaxWidth()) {
+                Box(Modifier.weight(1f).fillMaxWidth().noDibujarSi(reproductorTapa)) {
                     ContenidoPrincipal(navController, playerViewModel)
                 }
                 AnimatedVisibility(
-                    visible = !isNowPlaying && currentSong != null,
+                    visible = !isNowPlaying && haySong,
                     enter = slideInVertically(animationSpec = tween(300)) { it } + fadeIn(tween(300)),
                     exit = slideOutVertically(animationSpec = tween(300)) { it } + fadeOut(tween(300))
                 ) {
@@ -282,7 +313,9 @@ fun AuraMusicApp(
                 }
             }
         }
-        CapaReproductor(isNowPlaying, navController, playerViewModel)
+        CapaReproductor(isNowPlaying, navController, playerViewModel, reproductorTapa)
+        }
+        }
         }
     } else {
         // Liquid glass: el contenido ocupa toda la pantalla y se graba en
@@ -300,72 +333,179 @@ fun AuraMusicApp(
         Box(Modifier.fillMaxSize()) {
             Box(
                 Modifier.fillMaxSize()
+                    .noDibujarSi(reproductorTapa)
                     .then(if (conCristal) Modifier.layerBackdrop(fondoCristal) else Modifier)
                     .background(colorFondo)
             ) {
                 ContenidoPrincipal(navController, playerViewModel)
             }
-            AnimatedVisibility(
-                visible = !isNowPlaying,
-                // Al ritmo del reproductor: baja mientras la portada vuela hacia arriba.
-                enter = slideInVertically(Movimiento.vuelo()) { it },
-                exit = slideOutVertically(Movimiento.vuelo(Movimiento.MEDIA)) { it },
-                modifier = Modifier.align(Alignment.BottomCenter)
-            ) {
-                val alcanceMini = this
-                Column(Modifier.navigationBarsPadding().padding(bottom = 8.dp)) {
-                    AnimatedVisibility(
-                        visible = currentSong != null,
-                        // Fix 2: el mini player entra/sale deslizando desde abajo + fade (300ms).
-                        enter = slideInVertically(animationSpec = tween(300)) { it } + fadeIn(tween(300)),
-                        exit = slideOutVertically(animationSpec = tween(300)) { it } + fadeOut(tween(300))
-                    ) {
-                        MiniPlayer(playerViewModel, if (conCristal) fondoCristal else null, alcance = alcanceMini) {
-                            playerViewModel.abrirReproductor()
+            // Escena de la portada que vuela (mini ↔ reproductor). Abarca SOLO el mini, la
+            // barra y el reproductor: dentro de ella todo se mide dos veces (pasada
+            // "lookahead"), y antes envolvía también las pantallas de debajo, que se
+            // medían dos veces en cada cambio de canción o al desplazarse (en un Galaxy
+            // J7, ~1/4 del trabajo de los fotogramas lentos al cambiar de canción).
+            SharedTransitionLayout(Modifier.fillMaxSize()) {
+            CompositionLocalProvider(LocalTransicionCompartida provides this) {
+            Box(Modifier.fillMaxSize()) {
+            // Mini y barra se quedan CONSTRUIDOS con el reproductor abierto, como el
+            // reproductor cerrado (ver CapaReproductor): antes AnimatedVisibility los
+            // descartaba y al cerrar había que componerlos de cero, con el cristal, en
+            // el primer fotograma (~130–140 ms en un ZTE Blade A31 Lite). Ocultos no se
+            // colocan: ni se dibujan ni reciben toques, y el progreso del mini se lee
+            // al dibujar, así que no trabajan.
+            val barras = updateTransition(
+                if (isNowPlaying) EnterExitState.PostExit else EnterExitState.Visible, label = "barras")
+            // Al ritmo del reproductor: bajan mientras la portada vuela hacia arriba.
+            val bajada = barras.animateFloat(
+                transitionSpec = { if (targetState == EnterExitState.Visible) Movimiento.vuelo() else Movimiento.vuelo(Movimiento.MEDIA) },
+                label = "bajadaBarras"
+            ) { if (it == EnterExitState.Visible) 0f else 1f }
+            val alcanceMini = remember(barras) { object : AnimatedVisibilityScope { override val transition = barras } }
+            Column(
+                Modifier.align(Alignment.BottomCenter)
+                    .layout { medible, limites ->
+                        val p = medible.measure(limites)
+                        layout(p.width, p.height) {
+                            // Por el estado de la transición, no por isRunning: en el primer
+                            // fotograma de abrir aún no corre y desaparecían un fotograma.
+                            if (barras.currentState == EnterExitState.Visible || barras.targetState == EnterExitState.Visible)
+                                p.placeWithLayer(0, 0) { translationY = bajada.value * p.height }
                         }
                     }
-                    AuraBottomBar(
-                        navController = navController,
-                        currentDestination = currentDest,
-                        fondoCristal = if (conCristal) fondoCristal else null
-                    )
+                    .navigationBarsPadding().padding(bottom = 8.dp)
+            ) {
+                AnimatedVisibility(
+                    visible = haySong,
+                    // Fix 2: el mini player entra/sale deslizando desde abajo + fade (300ms).
+                    enter = slideInVertically(animationSpec = tween(300)) { it } + fadeIn(tween(300)),
+                    exit = slideOutVertically(animationSpec = tween(300)) { it } + fadeOut(tween(300))
+                ) {
+                    // Tapado por el reproductor, el cambio de canción no se anima.
+                    MiniPlayer(playerViewModel, if (conCristal) fondoCristal else null, alcance = alcanceMini, animar = !isNowPlaying) {
+                        playerViewModel.abrirReproductor()
+                    }
                 }
+                AuraBottomBar(
+                    navController = navController,
+                    currentDestination = currentDest,
+                    fondoCristal = if (conCristal) fondoCristal else null
+                )
             }
-            CapaReproductor(isNowPlaying, navController, playerViewModel)
+            CapaReproductor(isNowPlaying, navController, playerViewModel, reproductorTapa)
+            }
+            }
+            }
         }
         }
-    }
-    }
     }
 }
 
 // El reproductor a pantalla completa, como capa encima de la navegación: el Inicio
 // (o la pantalla que sea) sigue montado debajo, así que al cerrar la portada vuela
 // de vuelta al mini igual que al abrir. Sube un poco al aparecer y baja al irse.
+//
+// El reproductor se queda CONSTRUIDO aunque esté cerrado: antes AnimatedVisibility
+// lo descartaba y cada apertura tenía que componerlo y medirlo entero, un parón de
+// 80–160 ms al empezar la animación en gama baja (ZTE Blade A31 Lite). Cerrado no se
+// coloca (no se dibuja ni recibe toques) y NowPlayingScreen para lo que trabaja en
+// segundo plano. Cuesta ~1–2 MB. Se construye la primera vez que se abre o, si hay
+// una canción, 1,5 s después de arrancar (no en el primer fotograma: el arranque no
+// se alarga). El vuelo de la portada usa la misma transición que la capa.
 @Composable
 private fun CapaReproductor(
     abierto: Boolean,
     navController: androidx.navigation.NavHostController,
-    playerViewModel: PlayerViewModel
+    playerViewModel: PlayerViewModel,
+    tapa: MutableState<Boolean>
 ) {
-    AnimatedVisibility(
-        visible = abierto,
-        enter = fadeIn(Movimiento.fundido(Movimiento.LARGA)) +
-            slideInVertically(Movimiento.entrada(Movimiento.LARGA)) { SUBIDA_REPRODUCTOR },
-        exit = fadeOut(Movimiento.fundido(Movimiento.MEDIA)) +
-            slideOutVertically(Movimiento.vuelo(Movimiento.MEDIA)) { SUBIDA_REPRODUCTOR }
-    ) {
-        // Atrás cierra el reproductor (el visor de letras y la cola, compuestos
-        // dentro, se cierran antes porque sus manejadores van después).
-        BackHandler { playerViewModel.cerrarReproductor() }
-        CompositionLocalProvider(LocalAlcanceReproductor provides this) {
-            NowPlayingScreen(navController, playerViewModel)
+    val cancion = playerViewModel.currentSong.collectAsStateWithLifecycle()
+    val haySong by remember { derivedStateOf { cancion.value != null } }
+    var construido by remember { mutableStateOf(false) }
+    if (abierto) construido = true
+    LaunchedEffect(haySong) {
+        if (haySong && !construido) { kotlinx.coroutines.delay(1_500); construido = true }
+    }
+    if (!construido) return
+
+    val transicion = updateTransition(
+        if (abierto) EnterExitState.Visible else EnterExitState.PostExit, label = "capaReproductor")
+    // Lo que antes eran el enter/exit de AnimatedVisibility, con las mismas curvas.
+    val alfa = transicion.animateFloat(
+        transitionSpec = { if (targetState == EnterExitState.Visible) Movimiento.fundido(Movimiento.LARGA) else Movimiento.fundido(Movimiento.MEDIA) },
+        label = "alfaReproductor"
+    ) { if (it == EnterExitState.Visible) 1f else 0f }
+    val subida = transicion.animateFloat(
+        transitionSpec = { if (targetState == EnterExitState.Visible) Movimiento.entrada(Movimiento.LARGA) else Movimiento.vuelo(Movimiento.MEDIA) },
+        label = "subidaReproductor"
+    ) { if (it == EnterExitState.Visible) 0f else SUBIDA_REPRODUCTOR.toFloat() }
+    // Con el estado de la transición y no con isRunning: en el primer fotograma de
+    // abrir o cerrar la animación aún no ha empezado (isRunning es false) y salía un
+    // fotograma en negro al abrir (se dejaba de dibujar lo de debajo con el
+    // reproductor aún transparente) y otro sin reproductor al cerrar.
+    val enPantalla = abierto || transicion.currentState == EnterExitState.Visible
+
+    // Atrás cierra el reproductor (el visor de letras y la cola, compuestos dentro,
+    // se cierran antes porque sus manejadores van después). Con el gesto de atrás
+    // (Android 14+) el reproductor se encoge siguiendo el dedo y deja ver lo de debajo;
+    // al soltar se cierra con su animación de siempre y, si se cancela, vuelve a su sitio.
+    // Con el botón de atrás (o en Android < 14) se cierra sin más, como antes.
+    val gesto = remember { Animatable(0f) }
+    val desdeIzquierda = remember { mutableStateOf(true) }
+    val ambitoGesto = rememberCoroutineScope()
+    PredictiveBackHandler(enabled = abierto) { progreso ->
+        try {
+            progreso.collect { e ->
+                desdeIzquierda.value = e.swipeEdge == BackEventCompat.EDGE_LEFT
+                gesto.snapTo(e.progress)
+            }
+            playerViewModel.cerrarReproductor()
+        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+            ambitoGesto.launch { gesto.animateTo(0f, Movimiento.estandar()) }
+            throw e
+        }
+    }
+    // Encogido se sigue viendo hasta que termina de cerrarse; al reabrirlo, entero.
+    LaunchedEffect(abierto) { if (abierto) gesto.snapTo(0f) }
+    LaunchedEffect(transicion.currentState) { if (transicion.currentState == EnterExitState.PostExit) gesto.snapTo(0f) }
+    val encogido by remember { derivedStateOf { gesto.value > 0f } }
+
+    // Abierto del todo (opaco, en su sitio y sin encoger) tapa la pantalla entera. Al
+    // cerrar, abierto pasa a false en el mismo fotograma y lo de debajo vuelve a dibujarse.
+    val tapaAhora = abierto && !encogido && transicion.currentState == EnterExitState.Visible && !transicion.isRunning
+    SideEffect { tapa.value = tapaAhora }
+    val alcance = remember(transicion) { object : AnimatedVisibilityScope { override val transition = transicion } }
+    Box(Modifier.fillMaxSize().layout { medible, limites ->
+        // Se mide siempre (así abrir no tiene que medir nada), pero oculto no se coloca.
+        val p = medible.measure(limites)
+        layout(p.width, p.height) {
+            if (enPantalla) p.placeWithLayer(0, 0) {
+                alpha = alfa.value; translationY = subida.value
+                encogerConGesto(gesto.value, desdeIzquierda.value)
+            }
+        }
+    }) {
+        CompositionLocalProvider(LocalAlcanceReproductor provides alcance) {
+            NowPlayingScreen(navController, playerViewModel, visible = abierto)
         }
     }
 }
 
 // Lo que sube el reproductor al abrirse, en px.
 private const val SUBIDA_REPRODUCTOR = 120
+
+/**
+ * Con [oculto] en true su capa pasa a opacidad 0 y la GPU se la salta. Lo usa la
+ * navegación que queda debajo del reproductor abierto: dibujarla costaba ~5 ms por
+ * fotograma en un ZTE Blade A31 Lite (16 ms con el Inicio debajo frente a 11 ms con
+ * una pantalla vacía), y el cristal la volvía a grabar en su capa.
+ *
+ * No se deja de colocar: así Android descarta lo grabado y al cerrar el reproductor
+ * había que volver a grabar el Inicio entero (~95 ms, el peor fotograma del cierre
+ * pasaba de 87 a 160 ms). Con opacidad 0 lo grabado se conserva y al volver solo
+ * cambia una propiedad de la capa. El State se lee en la capa, sin recomponer.
+ */
+private fun Modifier.noDibujarSi(oculto: State<Boolean>) =
+    graphicsLayer { alpha = if (oculto.value) 0f else 1f }
 
 // Contenido principal (NavHost + indicador de sincronización). Reutilizado por el
 // layout de barra inferior (Compact/Medium) y el de NavigationRail (Expanded).
@@ -464,34 +604,102 @@ fun AuraBottomBar(
     val unselected = MaterialTheme.colorScheme.onSurfaceVariant
     val accent = MaterialTheme.colorScheme.primary
     val superficie = MaterialTheme.colorScheme.surfaceContainer
-    val indiceActivo = NAV_ITEMS.indexOfFirst { item ->
+    val indicePestana = NAV_ITEMS.indexOfFirst { item ->
         currentDestination?.hierarchy?.any { it.route == item.screen.route } == true
     }
-    val posicionBurbuja by animateFloatAsState(
-        targetValue = indiceActivo.coerceAtLeast(0).toFloat(),
-        animationSpec = spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow),
-        label = "burbujaPestana"
-    )
+    // En un detalle (playlist, artista, ajustes…) sigue marcada la pestaña de la que
+    // se vino. Antes no se marcaba ninguna y la burbuja volvía a la posición 0: al
+    // volver aparecía en Inicio y saltaba a la pestaña (p. ej. Biblioteca).
+    var ultimaPestana by remember { mutableIntStateOf(0) }
+    LaunchedEffect(indicePestana) { if (indicePestana >= 0) ultimaPestana = indicePestana }
+    val indiceActivo = if (indicePestana >= 0) indicePestana else ultimaPestana
+
+    // Cristal como el de SimpMusic (ver CristalLiquido.kt): la cápsula se oscurece según
+    // lo que tiene detrás y crece al pulsarla; la pestaña activa es una gota que se
+    // desliza estirándose, se hincha al tocarla y se puede arrastrar a otra pestaña. Sin
+    // cristal (Android < 13 o ajuste apagado) la gota es la píldora de color de siempre,
+    // con el mismo movimiento.
+    val capa = rememberGraphicsLayer()
+    val luminancia = rememberLuminanciaCristal(capa, activa = fondoCristal != null)
+    val oscuro = temaOscuro()
+    val n = NAV_ITEMS.size
+    val ambito = rememberCoroutineScope()
+    val anchoPestanaPx = remember { floatArrayOf(1f) }
+    val arrastrada = remember { booleanArrayOf(false) }
+    val activoActual by rememberUpdatedState(indiceActivo)
+    val gota = remember(ambito) {
+        GotaPestana(
+            ambito, valorInicial = indiceActivo.toFloat(), rango = 0f..(n - 1).toFloat(),
+            escalaPulsada = 76f / 56f,
+            alEmpezar = { arrastrada[0] = false },
+            alSoltar = {
+                if (arrastrada[0]) {
+                    val i = valorObjetivo.roundToInt().coerceIn(0, n - 1)
+                    // Siempre a una pestaña, aunque sea la misma: si no, se queda a medias.
+                    animarA(i.toFloat())
+                    if (i != activoActual) navegarAPestana(navController, NAV_ITEMS[i].screen)
+                }
+            },
+            alArrastrar = { dx ->
+                if (dx != 0f) arrastrada[0] = true
+                actualizar(valorObjetivo + dx / anchoPestanaPx[0])
+            }
+        )
+    }
+    // Al cambiar de pestaña (con un toque, al volver atrás o al arrastrar) la gota va hasta ella.
+    LaunchedEffect(indiceActivo) { if (gota.valorObjetivo != indiceActivo.toFloat()) gota.animarA(indiceActivo.toFloat()) }
+
     BoxWithConstraints(
         Modifier.fillMaxWidth()
             .padding(horizontal = 16.dp)
             .height(64.dp)
-            .capsulaCristal(
-                fondo = fondoCristal,
-                tinte = superficie.copy(alpha = 0.35f),
-                solido = superficie,
-                borde = MaterialTheme.colorScheme.onSurface.copy(0.08f)
-            )
-            .padding(4.dp)
     ) {
-        val anchoPestana = maxWidth / NAV_ITEMS.size
-        if (indiceActivo >= 0) Box(
-            Modifier.offset(x = anchoPestana * posicionBurbuja)
-                .width(anchoPestana).fillMaxHeight()
-                .clip(CircleShape)
-                .background(accent.copy(alpha = 0.16f))
+        val anchoPestana = (maxWidth - 8.dp) / n
+        anchoPestanaPx[0] = with(LocalDensity.current) { anchoPestana.toPx() }
+        // 1) La cápsula.
+        Box(
+            Modifier.matchParentSize().capsulaCristal(
+                fondo = fondoCristal, solido = superficie,
+                borde = MaterialTheme.colorScheme.onSurface.copy(0.08f),
+                capa = capa, luminancia = luminancia
+            )
         )
-        Row(Modifier.fillMaxSize()) {
+        // 2) La gota, detrás de los iconos.
+        val movimientoGota: GraphicsLayerScope.() -> Unit = {
+            scaleX = gota.escalaX; scaleY = gota.escalaY
+            val v = gota.velocidad / 10f
+            scaleX /= 1f - (v * 0.75f).coerceIn(-0.2f, 0.2f)
+            scaleY *= 1f - (v * 0.25f).coerceIn(-0.2f, 0.2f)
+        }
+        Box(
+            Modifier.align(Alignment.CenterStart)
+                .graphicsLayer { translationX = gota.valor * anchoPestanaPx[0] + 4.dp.toPx() }
+                .then(
+                    if (fondoCristal != null) Modifier.drawBackdrop(
+                        backdrop = fondoCristal,
+                        shape = { Capsule() },
+                        effects = {
+                            val l = (luminancia.value * 2f - 1f).let { kotlin.math.sign(it) * it * it }
+                            val p = gota.progresoPulsado
+                            vibrancy()
+                            colorControls(0.05f, 1f, 1.5f)
+                            blur((if (l > 0f) lerp(8.dp.toPx(), 16.dp.toPx(), l) else lerp(8.dp.toPx(), 2.dp.toPx(), -l)) + 20.dp.toPx())
+                            lens(10.dp.toPx() * p, 14.dp.toPx() * p, chromaticAberration = true)
+                        },
+                        highlight = { Highlight.Default.copy(alpha = 0.6f) },
+                        shadow = { Shadow(radius = 4.dp, alpha = 0.4f) },
+                        innerShadow = { val p = gota.progresoPulsado; InnerShadow(radius = 8.dp * p, alpha = p) },
+                        layerBlock = movimientoGota,
+                        onDrawSurface = {
+                            val claro = ((luminancia.value - 0.3f) / 0.5f).coerceIn(0f, 1f)
+                            drawRect(Color.Black.copy(alpha = if (oscuro) lerp(0.22f, 0.55f, claro) else lerp(0.06f, 0.14f, claro)))
+                        }
+                    ) else Modifier.graphicsLayer(movimientoGota).clip(CircleShape).background(accent.copy(alpha = 0.16f))
+                )
+                .width(anchoPestana).height(ALTO_GOTA)
+        )
+        // 3) Iconos y nombres encima, nítidos; llevan el arrastre de la gota.
+        Row(Modifier.matchParentSize().padding(horizontal = 4.dp).then(gota.modificador)) {
             NAV_ITEMS.forEachIndexed { i, item ->
                 PestanaFlotante(
                     item = item, selected = i == indiceActivo, accent = accent, unselected = unselected,
@@ -506,26 +714,18 @@ fun AuraBottomBar(
 private fun RowScope.PestanaFlotante(
     item: NavItem, selected: Boolean, accent: Color, unselected: Color, onClick: () -> Unit
 ) {
-    val scale by animateFloatAsState(
-        targetValue = if (selected) 1.1f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
-        label = "navScale"
-    )
-    val color by animateColorAsState(
-        targetValue = if (selected) accent else unselected,
-        animationSpec = tween(200), label = "navColor"
-    )
+    val color = if (selected) accent else unselected
     Column(
         Modifier.weight(1f).fillMaxHeight()
             .clip(CircleShape)
-            .clickable(onClick = onClick),
+            .clickable(interactionSource = null, indication = null, role = Role.Tab, onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically)
     ) {
         Icon(
             if (selected) item.filled else item.outlined,
             contentDescription = stringResource(item.labelRes),
-            tint = color, modifier = Modifier.size(24.dp).scale(scale)
+            tint = color, modifier = Modifier.size(24.dp)
         )
         Text(stringResource(item.labelRes), fontSize = 10.sp, color = color, maxLines = 1, softWrap = false)
     }
@@ -533,7 +733,7 @@ private fun RowScope.PestanaFlotante(
 
 // ─── Mini Player Premium ──────────────────────────────────────────────────
 @Composable
-fun MiniPlayer(vm: PlayerViewModel, fondoCristal: Backdrop?, alcance: AnimatedVisibilityScope? = null, onClick: () -> Unit) {
+fun MiniPlayer(vm: PlayerViewModel, fondoCristal: Backdrop?, alcance: AnimatedVisibilityScope? = null, animar: Boolean = true, onClick: () -> Unit) {
     val song      by vm.currentSong.collectAsStateWithLifecycle()
     val isPlaying by vm.isPlaying.collectAsStateWithLifecycle()
     // progressMs cambia en cada tic: aquí solo se guarda el State y se lee al dibujar
@@ -568,7 +768,7 @@ fun MiniPlayer(vm: PlayerViewModel, fondoCristal: Backdrop?, alcance: AnimatedVi
                 Box(Modifier.size(46.dp)) {
                     AnimatedContent(
                         targetState = song, contentKey = { it?.id },
-                        transitionSpec = { fadeIn(Movimiento.fundido()) togetherWith fadeOut(Movimiento.salida()) },
+                        transitionSpec = { if (animar) fadeIn(Movimiento.fundido()) togetherWith fadeOut(Movimiento.salida()) else sinAnimacion() },
                         label = "miniPortada"
                     ) { s ->
                         Card(
@@ -586,7 +786,7 @@ fun MiniPlayer(vm: PlayerViewModel, fondoCristal: Backdrop?, alcance: AnimatedVi
                 Spacer(Modifier.width(10.dp))
                 AnimatedContent(
                     targetState = song, contentKey = { it?.id },
-                    transitionSpec = { cambioVertical() }, label = "miniTextos",
+                    transitionSpec = { if (animar) cambioVertical() else sinAnimacion() }, label = "miniTextos",
                     modifier = Modifier.weight(1f)
                 ) { s ->
                     Column {
@@ -635,16 +835,16 @@ fun MiniPlayer(vm: PlayerViewModel, fondoCristal: Backdrop?, alcance: AnimatedVi
         }
     }
 
-    // Cápsula de cristal (o sólida del tema si no hay cristal).
+    // Cápsula de cristal (o sólida del tema si no hay cristal). Mide su propio fondo para
+    // graduar el velo y crece poco al pulsarla, por ser ancha (como en SimpMusic).
+    val capa = rememberGraphicsLayer()
+    val luminancia = rememberLuminanciaCristal(capa, activa = fondoCristal != null)
     Box(
         modificadorMini.capsulaCristal(
             fondo = fondoCristal,
-            tinte = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.20f),
             solido = MaterialTheme.colorScheme.surfaceContainer,
             borde = MaterialTheme.colorScheme.onSurface.copy(0.08f),
-            desenfoque = 6.dp,
-            alturaRefraccion = 16.dp,
-            refraccion = 32.dp
+            capa = capa, luminancia = luminancia, escalaPulsado = 1.04f
         ),
         content = contenidoMini
     )

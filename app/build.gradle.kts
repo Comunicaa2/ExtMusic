@@ -31,8 +31,8 @@ android {
         applicationId = "com.auramusic.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "1.3.0"
+        versionCode = 8
+        versionName = "1.4.0"
 
         // (M2) Se eliminaron YT_CLIENT_ID / YT_CLIENT_SECRET: eran del login de TV
         // antiguo, ningún .kt los usa y quedaban expuestos en el APK. El login nativo
@@ -117,13 +117,13 @@ dependencies {
     // Media3 completo — FLAC, ALAC, WAV, Opus, HiRes
     implementation("androidx.media3:media3-exoplayer:1.11.1")
     implementation("androidx.media3:media3-session:1.11.1")
-    implementation("androidx.media3:media3-ui:1.11.1")
+    // Sin media3-ui, -exoplayer-dash ni -exoplayer-hls: no se usaban (solo audio
+    // progresivo) y DASH/HLS se cargaban igual por reflexión.
     implementation("androidx.media3:media3-common:1.11.1")
-    implementation("androidx.media3:media3-datasource-okhttp:1.11.1")
-    implementation("androidx.media3:media3-exoplayer-dash:1.11.1")
-    implementation("androidx.media3:media3-exoplayer-hls:1.11.1")
     implementation("androidx.media3:media3-database:1.11.1")
     implementation("androidx.media3:media3-datasource:1.11.1")
+    // El audio se descarga con OkHttp y no con DefaultHttpDataSource (ver MusicService).
+    implementation("androidx.media3:media3-datasource-okhttp:1.11.1")
     implementation("androidx.media3:media3-extractor:1.11.1")
 
     // Hilt
@@ -136,11 +136,9 @@ dependencies {
     implementation("androidx.room:room-ktx:2.8.5")
     ksp("androidx.room:room-compiler:2.8.5")
 
-    // Ktor
-    implementation("io.ktor:ktor-client-android:3.6.0")
+    // Ktor (motor OkHttp; los de Android y el registro de peticiones no se usaban)
     implementation("io.ktor:ktor-client-content-negotiation:3.6.0")
     implementation("io.ktor:ktor-serialization-kotlinx-json:3.6.0")
-    implementation("io.ktor:ktor-client-logging:3.6.0")
     implementation("io.ktor:ktor-client-okhttp:3.6.0")
 
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
@@ -181,7 +179,8 @@ dependencies {
     // Fase 3: subido a v0.26.3 (motor moderno con refactor de clientes y soporte
     // de poToken, PR #1272). Es el mismo motor de extracción del ecosistema
     // NewPipe/BravePipe en el que se apoya SimpMusic para el stream real.
-    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.5")
+    // v0.27.1: parseo de n-sig actualizado (#1545, #1556). Pide Java 17.
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.27.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

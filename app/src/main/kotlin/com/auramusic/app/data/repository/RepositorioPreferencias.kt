@@ -108,7 +108,7 @@ class RepositorioPreferencias @Inject constructor(
                 cachearStreams           = prefs[Claves.CACHE_STREAMS] ?: true,
                 // Calidad
                 audioQuality             = leerCalidad(prefs[Claves.CALIDAD_AUDIO]),
-                downloadQuality          = leerCalidad(prefs[Claves.CALIDAD_DESCARGA]),
+                downloadQuality          = leerCalidad(prefs[Claves.CALIDAD_DESCARGA], AudioQuality.MEDIUM),
                 // Descargas
                 formatoDescarga          = leerFormato(prefs[Claves.FORMATO_DESCARGA]),
                 descargarAlDarLike       = prefs[Claves.DESCARGAR_AL_LIKE] ?: false,
@@ -120,7 +120,7 @@ class RepositorioPreferencias @Inject constructor(
                 // Biblioteca local
                 carpetasEscaneo          = prefs[Claves.CARPETAS_ESCANEO] ?: "",
                 // Caché
-                cacheMaximoMb            = (prefs[Claves.CACHE_MAX_MB] ?: 256).coerceAtLeast(32),
+                cacheMaximoMb            = com.auramusic.app.domain.model.limiteCacheAudioMb(prefs[Claves.CACHE_MAX_MB]),
                 // Letras
                 showLyrics               = prefs[Claves.MOSTRAR_LETRAS] ?: true,
                 letrasAutomaticas        = prefs[Claves.LETRAS_AUTO] ?: true,
@@ -162,7 +162,9 @@ class RepositorioPreferencias @Inject constructor(
     // Biblioteca local
     suspend fun guardarCarpetasEscaneo(carpetas: String) = editar { it[Claves.CARPETAS_ESCANEO] = carpetas }
     // Caché
-    suspend fun guardarCacheMaximoMb(mb: Int)           = editar { it[Claves.CACHE_MAX_MB] = mb.coerceAtLeast(32) }
+    suspend fun guardarCacheMaximoMb(mb: Int)           = editar {
+        it[Claves.CACHE_MAX_MB] = mb.coerceIn(com.auramusic.app.domain.model.CACHE_AUDIO_MIN_MB, com.auramusic.app.domain.model.CACHE_AUDIO_MAX_MB)
+    }
     // Letras
     suspend fun guardarMostrarLetras(activo: Boolean)   = editar { it[Claves.MOSTRAR_LETRAS] = activo }
     suspend fun guardarLetrasAutomaticas(activo: Boolean) = editar { it[Claves.LETRAS_AUTO] = activo }
@@ -198,7 +200,7 @@ class RepositorioPreferencias @Inject constructor(
         it[Claves.DESCARGAR_LETRAS] = a.descargarLetras
         it[Claves.DESCARGA_SOLO_WIFI] = a.descargarSoloWifi
         it[Claves.DESCARGAS_SIMULT] = a.descargasSimultaneas.coerceIn(1, 3)
-        it[Claves.CACHE_MAX_MB] = a.cacheMaximoMb.coerceIn(32, 16_384)
+        it[Claves.CACHE_MAX_MB] = com.auramusic.app.domain.model.limiteCacheAudioMb(a.cacheMaximoMb)
         it[Claves.MOSTRAR_LETRAS] = a.showLyrics
         it[Claves.LETRAS_AUTO] = a.letrasAutomaticas
         it[Claves.LETRAS_TAMANO] = a.tamanoFuenteLetras.coerceIn(12, 28)
@@ -209,10 +211,10 @@ class RepositorioPreferencias @Inject constructor(
         dataStore.edit(bloque)
     }
 
-    // Lee el enum de forma segura (si el guardado está corrupto, vuelve a HIGH).
-    private fun leerCalidad(valor: String?): AudioQuality =
-        runCatching { AudioQuality.valueOf(valor ?: AudioQuality.HIGH.name) }
-            .getOrDefault(AudioQuality.HIGH)
+    // Lee el enum de forma segura (sin guardar o corrupto, vuelve a [porDefecto]).
+    private fun leerCalidad(valor: String?, porDefecto: AudioQuality = AudioQuality.HIGH): AudioQuality =
+        runCatching { AudioQuality.valueOf(valor ?: porDefecto.name) }
+            .getOrDefault(porDefecto)
 
     private fun leerCodec(valor: String?): CodecAudio =
         runCatching { CodecAudio.valueOf(valor ?: CodecAudio.AAC.name) }

@@ -4,6 +4,10 @@ import android.content.Context
 import android.net.Uri
 import androidx.room.withTransaction
 import com.auramusic.app.data.db.AuraDatabase
+import com.auramusic.app.data.db.MAX_PERFILES
+import com.auramusic.app.data.db.PERFIL_PRINCIPAL
+import com.auramusic.app.data.db.PerfilCancion
+import com.auramusic.app.data.db.PerfilEntity
 import com.auramusic.app.data.db.PlaylistEntity
 import com.auramusic.app.data.db.PlaylistSongCrossRef
 import com.auramusic.app.data.db.SongEntity
@@ -57,30 +61,60 @@ class RespaldoRepository @Inject constructor(
         val cola: Boolean = false,
         val descartados: Int = 0,
         // Descargadas en el respaldo cuyo archivo no está en este teléfono.
-        val porDescargar: List<SongEntity> = emptyList()
+        val porDescargar: List<SongEntity> = emptyList(),
+        // Perfiles del backup que no se importaron porque ya había MAX_PERFILES.
+        val perfilesOmitidos: Int = 0
     )
 
     /** El respaldo pasa de los límites (archivo, texto o número de elementos). */
     class RespaldoDemasiadoGrande : IOException("El respaldo es demasiado grande")
 
+    private class Instantanea(
+        val canciones: List<SongEntity>, val perfiles: List<PerfilRespaldo>,
+        val playlists: List<PlaylistEntity>, val relaciones: Map<String, List<PlaylistSongCrossRef>>
+    )
+
     suspend fun exportar(destino: Uri): Resumen = withContext(Dispatchers.IO) {
-        val canciones = db.songDao().todas()
-        val playlists = db.playlistDao().todas()
-        val relaciones = db.playlistDao().todasLasRelaciones().groupBy { it.playlistId }
+        // Todo en una transacción: un cambio de perfil a mitad no puede mezclar nada.
+        val foto = db.withTransaction {
+            val canciones = db.songDao().todas()
+            val perfiles = db.perfilDao().lista()
+            val activo = perfiles.firstOrNull { it.activo }?.id ?: PERFIL_PRINCIPAL
+            Instantanea(
+                canciones = canciones,
+                perfiles = perfiles.map { p ->
+                    // El activo está en `songs`; los demás, en perfil_canciones.
+                    val historial = if (p.id == activo)
+                        canciones.filter { it.tieneEstado() }.map {
+                            HistorialRespaldo(it.id, it.isLiked, it.playCount, it.lastPlayed, it.noRecomendar)
+                        }
+                    else db.perfilDao().estadoDe(p.id).map {
+                        HistorialRespaldo(it.songId, it.isLiked, it.playCount, it.lastPlayed, it.noRecomendar)
+                    }
+                    PerfilRespaldo(p.id, p.nombre, p.creado, historial)
+                },
+                playlists = db.playlistDao().todasDeTodos(),
+                relaciones = db.playlistDao().todasLasRelaciones().groupBy { it.playlistId }
+            )
+        }
         val cola = leerCola()
         val respaldo = Respaldo(
             version = VERSION_FORMATO,
             creado = System.currentTimeMillis(),
-            canciones = canciones.map { it.aRespaldo() },
-            playlists = playlists.map { p ->
+            // Solo el catálogo: lo de cada perfil va en su historial.
+            canciones = foto.canciones.map { it.copy(isLiked = false, playCount = 0, lastPlayed = 0).aRespaldo() },
+            playlists = foto.playlists.map { p ->
                 PlaylistRespaldo(
-                    id = p.id, nombre = p.name, creada = p.createdAt,
-                    canciones = relaciones[p.id].orEmpty().sortedBy { it.position }.map { it.songId }
+                    id = p.id, nombre = p.name, creada = p.createdAt, perfilId = p.perfilId,
+                    canciones = foto.relaciones[p.id].orEmpty().sortedBy { it.position }.map { it.songId }
                 )
             },
             ajustes = preferencias.ajustes.first().aRespaldo(),
-            cola = cola
+            cola = cola,
+            perfiles = foto.perfiles
         )
+        val canciones = foto.canciones
+        val playlists = foto.playlists
         val salida = contexto.contentResolver.openOutputStream(destino, "wt")
             ?: error("No se pudo abrir el archivo de destino")
         GZIPOutputStream(salida).bufferedWriter().use { it.write(json.encodeToString(Respaldo.serializer(), respaldo)) }
@@ -92,60 +126,126 @@ class RespaldoRepository @Inject constructor(
         require(respaldo.version <= VERSION_FORMATO) { "Backup de una versión más nueva de ExtMusic" }
         if (respaldo.canciones.size > MAX_CANCIONES || respaldo.playlists.size > MAX_PLAYLISTS ||
             respaldo.playlists.any { it.canciones.size > MAX_POR_LISTA } ||
-            (respaldo.cola?.items?.size ?: 0) > MAX_POR_LISTA
+            (respaldo.cola?.items?.size ?: 0) > MAX_POR_LISTA ||
+            respaldo.perfiles.size > MAX_PERFILES_ARCHIVO ||
+            respaldo.perfiles.any { it.historial.size > MAX_CANCIONES }
         ) throw RespaldoDemasiadoGrande()
 
         val cancionesValidas = respaldo.canciones.filter { idCancionValido(it.id) }.distinctBy { it.id }
         val playlistsValidas = respaldo.playlists.filter { ID_PLAYLIST.matches(it.id) }.distinctBy { it.id }
         val porDescargar = mutableListOf<SongEntity>()
 
+        // Formato 3: cada perfil trae su historial. Los formatos 1 y 2 traían uno solo,
+        // que es del perfil principal (aunque ahora esté activo otro).
+        val perfilesArchivo: List<PerfilRespaldo> =
+            if (respaldo.version >= 3) respaldo.perfiles.filter { ID_PERFIL.matches(it.id) }.distinctBy { it.id }
+            else listOf(PerfilRespaldo(PERFIL_PRINCIPAL, "Principal", 0L,
+                cancionesValidas.filter { it.isLiked || it.playCount > 0 || it.lastPlayed > 0 }
+                    .map { HistorialRespaldo(it.id, it.isLiked, it.playCount, it.lastPlayed, false) }))
+        var descartados = (respaldo.canciones.size - cancionesValidas.size) +
+            (respaldo.playlists.size - playlistsValidas.size)
+        var perfilesOmitidos = 0
+        var playlistsImportadas = 0
+
         val songDao = db.songDao()
         val playlistDao = db.playlistDao()
+        val perfilDao = db.perfilDao()
         db.withTransaction {
-            val existentes = songDao.todas().associateBy { it.id }
-            val fusionadas = cancionesValidas.map { r ->
-                val actual = existentes[r.id]
-                if (actual != null) {
-                    // Ya está en la app: se respeta su estado (descarga, metadatos) y
-                    // solo se suma lo que el backup aporta.
-                    actual.copy(
-                        isLiked = actual.isLiked || r.isLiked,
-                        playCount = maxOf(actual.playCount, r.playCount),
-                        lastPlayed = maxOf(actual.lastPlayed, r.lastPlayed)
-                    )
-                } else {
-                    r.aEntidad().conDescargaValida().also { nueva ->
+            // Catálogo: solo se añaden las que faltan; las que ya están no se tocan.
+            val existentes = songDao.todosLosIds().toHashSet()
+            val nuevas = cancionesValidas.filter { it.id !in existentes }.map { r ->
+                r.aEntidad().copy(isLiked = false, playCount = 0, lastPlayed = 0, noRecomendar = false)
+                    .conDescargaValida().also { nueva ->
                         if (r.isDownloaded && !nueva.isDownloaded && ID_YOUTUBE.matches(nueva.id)) porDescargar += nueva
                     }
-                }
             }
-            songDao.upsert(fusionadas)
+            songDao.upsert(nuevas)
+            val idsValidos = existentes + nuevas.map { it.id }
 
-            playlistDao.insertarSiNoExisten(
-                playlistsValidas.map { PlaylistEntity(id = it.id, name = it.nombre.take(MAX_TEXTO_CORTO), createdAt = it.creada) }
-            )
+            // Perfiles: cada uno se fusiona SOLO con el de su mismo id o se crea; nunca
+            // se mete en otro ni cambia el activo.
+            val locales = perfilDao.lista().associateBy { it.id }.toMutableMap()
+            val activo = perfilDao.activoId() ?: PERFIL_PRINCIPAL
+            val destinos = HashSet<String>()
+            for (p in perfilesArchivo) {
+                if (p.id !in locales) {
+                    if (locales.size >= MAX_PERFILES) { perfilesOmitidos++; continue }
+                    val nuevo = PerfilEntity(p.id, nombrePerfil(p.nombre), p.creado.takeIf { it > 0 } ?: System.currentTimeMillis(), false)
+                    perfilDao.crear(nuevo)
+                    locales[p.id] = nuevo
+                }
+                destinos += p.id
+                val historial = p.historial.filter { idCancionValido(it.id) && it.id in idsValidos }.distinctBy { it.id }
+                if (p.id == activo) fusionarEnActivo(historial) else fusionarEnOtro(p.id, historial)
+            }
+
+            // Playlists: cada una a su perfil; si su perfil no entró, se descarta.
+            val yaEstaban = playlistDao.todasDeTodos().associateBy { it.id }
+            val aceptadas = playlistsValidas.filter { pl ->
+                val perfil = if (respaldo.version >= 3) pl.perfilId ?: PERFIL_PRINCIPAL else PERFIL_PRINCIPAL
+                val previa = yaEstaban[pl.id]
+                // Una con el mismo id en otro perfil no se toca (sería mezclar).
+                (perfil in destinos && (previa == null || previa.perfilId == perfil)).also { if (!it) descartados++ }
+            }
+            playlistDao.insertarSiNoExisten(aceptadas.map {
+                PlaylistEntity(id = it.id, name = it.nombre.take(MAX_TEXTO_CORTO),
+                    perfilId = if (respaldo.version >= 3) it.perfilId ?: PERFIL_PRINCIPAL else PERFIL_PRINCIPAL,
+                    createdAt = it.creada)
+            })
             // Solo se relacionan canciones que existen (la FK lo exige). Las que ya
             // estaban en la playlist conservan su posición (IGNORE).
-            val idsValidos = existentes.keys + fusionadas.map { it.id }
             playlistDao.relacionarSiNoExisten(
-                playlistsValidas.flatMap { p ->
+                aceptadas.flatMap { p ->
                     p.canciones.filter { it in idsValidos }.mapIndexed { i, id ->
                         PlaylistSongCrossRef(playlistId = p.id, songId = id, position = i)
                     }
                 }
             )
+            playlistsImportadas = aceptadas.size
         }
 
         val ajustes = respaldo.ajustes?.let { preferencias.restaurar(it.aplicarSobre(preferencias.ajustes.first())); true } ?: false
         val cola = respaldo.cola?.let { restaurarCola(it) } ?: false
         Resumen(
-            canciones = cancionesValidas.size, playlists = playlistsValidas.size,
+            canciones = cancionesValidas.size, playlists = playlistsImportadas,
             ajustes = ajustes, cola = cola,
-            descartados = (respaldo.canciones.size - cancionesValidas.size) +
-                (respaldo.playlists.size - playlistsValidas.size),
-            porDescargar = porDescargar
+            descartados = descartados,
+            porDescargar = porDescargar,
+            perfilesOmitidos = perfilesOmitidos
         )
     }
+
+    // Lo que aporta el backup se suma: Me gusta y "No recomendar" si cualquiera lo
+    // tiene; escuchas y última vez, el mayor.
+    private suspend fun fusionarEnActivo(historial: List<HistorialRespaldo>) {
+        if (historial.isEmpty()) return
+        val songDao = db.songDao()
+        val porId = historial.associateBy { it.id }
+        val actuales = songDao.todas().filter { it.id in porId }
+        songDao.upsert(actuales.map { s ->
+            val h = porId.getValue(s.id)
+            s.copy(isLiked = s.isLiked || h.isLiked, playCount = maxOf(s.playCount, h.playCount),
+                lastPlayed = maxOf(s.lastPlayed, h.lastPlayed), noRecomendar = s.noRecomendar || h.noRecomendar)
+        })
+    }
+
+    private suspend fun fusionarEnOtro(perfilId: String, historial: List<HistorialRespaldo>) {
+        if (historial.isEmpty()) return
+        val perfilDao = db.perfilDao()
+        val actuales = perfilDao.estadoDe(perfilId).associateBy { it.songId }
+        perfilDao.guardarEstado(historial.map { h ->
+            val a = actuales[h.id]
+            PerfilCancion(perfilId, h.id,
+                isLiked = (a?.isLiked ?: false) || h.isLiked,
+                playCount = maxOf(a?.playCount ?: 0L, h.playCount.coerceAtLeast(0)),
+                lastPlayed = maxOf(a?.lastPlayed ?: 0L, h.lastPlayed),
+                noRecomendar = (a?.noRecomendar ?: false) || h.noRecomendar)
+        })
+    }
+
+    private fun nombrePerfil(n: String) = n.trim().take(MAX_NOMBRE_PERFIL).ifBlank { "Perfil" }
+
+    private fun SongEntity.tieneEstado() = isLiked || playCount > 0 || lastPlayed > 0 || noRecomendar
 
     // Lee el archivo con topes: comprimido o no, nunca más de MAX_ARCHIVO bytes del
     // disco ni MAX_TEXTO de texto (un "gzip bomba" se corta en vez de llenar la memoria).
@@ -231,7 +331,12 @@ class RespaldoRepository @Inject constructor(
     )
 
     private companion object {
-        const val VERSION_FORMATO = 2
+        // 3: perfiles de gusto, cada uno con su historial (las canciones van sin él).
+        // Las versiones anteriores de la app rechazan este formato en vez de mezclarlo.
+        const val VERSION_FORMATO = 3
+        const val MAX_PERFILES_ARCHIVO = 50
+        const val MAX_NOMBRE_PERFIL = 40
+        val ID_PERFIL = Regex("^[\\w-]{1,40}$")
         const val PREFIJO_MEDIA = "content://media/"
         const val MAX_ARCHIVO = 10L * 1024 * 1024
         const val MAX_TEXTO = 20L * 1024 * 1024
@@ -271,7 +376,9 @@ private data class Respaldo(
     val canciones: List<CancionRespaldo>,
     val playlists: List<PlaylistRespaldo>,
     val ajustes: AjustesRespaldo? = null,
-    val cola: ColaRespaldo? = null
+    val cola: ColaRespaldo? = null,
+    // Formato 3.
+    val perfiles: List<PerfilRespaldo> = emptyList()
 )
 
 @Serializable
@@ -279,7 +386,26 @@ private data class PlaylistRespaldo(
     val id: String,
     val nombre: String,
     val creada: Long,
-    val canciones: List<String>
+    val canciones: List<String>,
+    val perfilId: String? = null
+)
+
+@Serializable
+private data class PerfilRespaldo(
+    val id: String,
+    val nombre: String,
+    val creado: Long = 0,
+    val historial: List<HistorialRespaldo> = emptyList()
+)
+
+/** Lo de una canción en un perfil. */
+@Serializable
+private data class HistorialRespaldo(
+    val id: String,
+    val isLiked: Boolean = false,
+    val playCount: Long = 0,
+    val lastPlayed: Long = 0,
+    val noRecomendar: Boolean = false
 )
 
 @Serializable

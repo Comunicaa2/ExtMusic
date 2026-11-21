@@ -3,6 +3,7 @@ package com.auramusic.app.data.repository
 import android.net.Uri
 import androidx.room.withTransaction
 import com.auramusic.app.data.db.AuraDatabase
+import com.auramusic.app.data.db.PERFIL_PRINCIPAL
 import com.auramusic.app.data.db.PlaylistEntity
 import com.auramusic.app.data.db.PlaylistSongCrossRef
 import com.auramusic.app.data.db.SongEntity
@@ -59,8 +60,11 @@ class ImportadorPlaylists @Inject constructor(
         db.withTransaction {
             val existentes = songDao.todosLosIds().toHashSet()
             songDao.upsert(canciones.filter { it.id !in existentes })
-            val idLocal = "yt_$listId"
-            playlistDao.insertarSiNoExisten(listOf(PlaylistEntity(id = idLocal, name = nombre)))
+            // Cada perfil de gusto tiene su copia: el id lleva el perfil (salvo el
+            // principal, que conserva el de siempre).
+            val perfil = playlistDao.perfilActivo() ?: PERFIL_PRINCIPAL
+            val idLocal = if (perfil == PERFIL_PRINCIPAL) "yt_$listId" else "yt_${perfil}_$listId"
+            playlistDao.insertarSiNoExisten(listOf(PlaylistEntity(id = idLocal, name = nombre, perfilId = perfil)))
             playlistDao.relacionarSiNoExisten(
                 canciones.mapIndexed { i, c -> PlaylistSongCrossRef(idLocal, c.id, i) }
             )

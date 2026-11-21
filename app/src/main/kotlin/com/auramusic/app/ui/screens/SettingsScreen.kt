@@ -103,10 +103,16 @@ fun SettingsScreen(navController: NavController) {
     var dlgCalidadDescarga by remember { mutableStateOf(false) }
     var dlgMusicaTelefono by remember { mutableStateOf(false) }
     var dlgAlmacenamiento by remember { mutableStateOf(false) }
+    var dlgPerfiles by remember { mutableStateOf(false) }
+    val perfilesVm: PerfilesViewModel = hiltViewModel()
+    val perfilActivo by perfilesVm.activo.collectAsStateWithLifecycle()
+    if (dlgPerfiles) com.auramusic.app.ui.components.DialogoGestionPerfiles(perfilesVm) { dlgPerfiles = false }
+    var dlgNoRecomendadas by remember { mutableStateOf(false) }
+    if (dlgNoRecomendadas) com.auramusic.app.ui.components.DialogoNoRecomendadas(perfilesVm) { dlgNoRecomendadas = false }
 
-    // Uso actual de la caché, para "Almacenamiento". Se recalcula al limpiarla.
-    var usoCacheMb by remember { mutableIntStateOf(-1) }
-    LaunchedEffect(Unit) { vm.usoCacheMb { usoCacheMb = it } }
+    // Lo que ocupa la app, para "Almacenamiento". Se recalcula al abrirlo y al liberar.
+    var uso by remember { mutableStateOf<SettingsViewModel.UsoAlmacenamiento?>(null) }
+    LaunchedEffect(Unit) { vm.usoAlmacenamiento { uso = it } }
 
     val pickerCarpetasEscaneo = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -171,6 +177,7 @@ fun SettingsScreen(navController: NavController) {
     }
     if (dlgAlmacenamiento) {
         val msgLimpia = stringResource(R.string.cache_limpiada)
+        LaunchedEffect(Unit) { vm.usoAlmacenamiento { uso = it } }
         AlertDialog(
             onDismissRequest = { dlgAlmacenamiento = false },
             title = { Text(stringResource(R.string.datos_almacenamiento)) },
@@ -182,12 +189,26 @@ fun SettingsScreen(navController: NavController) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(8.dp))
+                    // Qué ocupa cada parte (descargas incluidas, para que nada quede oculto).
+                    val u = uso
+                    FilaUso(stringResource(R.string.almacenamiento_audio),
+                        u?.let { stringResource(R.string.almacenamiento_de, mb(it.audio), s.cacheMaximoMb) })
+                    FilaUso(stringResource(R.string.almacenamiento_portadas),
+                        u?.let { stringResource(R.string.almacenamiento_de, mb(it.portadas), com.auramusic.app.domain.model.CACHE_PORTADAS_MB.toInt()) })
+                    FilaUso(stringResource(R.string.almacenamiento_descargas),
+                        u?.let { stringResource(R.string.cache_mb, mb(it.descargas)) })
+                    FilaUso(stringResource(R.string.almacenamiento_total),
+                        u?.let { stringResource(R.string.cache_mb, mb(it.total)) }, destacada = true)
+                    Spacer(Modifier.height(4.dp))
                     SettingsSliderItem(
                         title = stringResource(R.string.cache_tamano),
-                        valor = s.cacheMaximoMb, rango = 64f..1024f, pasos = 14,
+                        valor = s.cacheMaximoMb,
+                        rango = com.auramusic.app.domain.model.CACHE_AUDIO_MIN_MB.toFloat()..com.auramusic.app.domain.model.CACHE_AUDIO_MAX_MB.toFloat(),
+                        pasos = 8,   // de 50 en 50
                         icon = Icons.Default.Storage,
                         valorTexto = { stringResource(R.string.cache_mb, it) },
-                        onCommit = { vm.setCacheMaximoMb(it) },
+                        // Se recalcula cuando ya se recortó lo que sobraba.
+                        onCommit = { vm.setCacheMaximoMb(it) { vm.usoAlmacenamiento { nuevo -> uso = nuevo } } },
                         subtitle = stringResource(R.string.cache_tamano_desc)
                     )
                     ListItem(
@@ -196,7 +217,7 @@ fun SettingsScreen(navController: NavController) {
                         leadingContent = { Icon(Icons.Default.DeleteSweep, null) },
                         modifier = Modifier.clickable {
                             vm.limpiarCache {
-                                vm.usoCacheMb { usoCacheMb = it }
+                                vm.usoAlmacenamiento { uso = it }
                                 avisar(msgLimpia)
                             }
                         }
@@ -394,6 +415,22 @@ fun SettingsScreen(navController: NavController) {
             item { SettingsSectionHeader(stringResource(R.string.sec_tus_datos)) }
             item {
                 SettingsClickItem(
+                    title = stringResource(R.string.perfiles_titulo),
+                    subtitle = perfilActivo?.nombre.orEmpty(),
+                    icon = Icons.Default.ManageAccounts,
+                    onClick = { dlgPerfiles = true }
+                )
+            }
+            item {
+                SettingsClickItem(
+                    title = stringResource(R.string.no_recomendadas_titulo),
+                    subtitle = stringResource(R.string.no_recomendadas_desc),
+                    icon = Icons.Default.Block,
+                    onClick = { dlgNoRecomendadas = true }
+                )
+            }
+            item {
+                SettingsClickItem(
                     title = stringResource(R.string.respaldo_exportar),
                     subtitle = stringResource(R.string.respaldo_exportar_desc),
                     icon = Icons.Default.Backup,
@@ -424,8 +461,8 @@ fun SettingsScreen(navController: NavController) {
             item {
                 SettingsClickItem(
                     title = stringResource(R.string.datos_almacenamiento),
-                    subtitle = if (usoCacheMb < 0) stringResource(R.string.datos_almacenamiento_calculando)
-                               else stringResource(R.string.datos_almacenamiento_uso, usoCacheMb, s.cacheMaximoMb),
+                    subtitle = uso?.let { stringResource(R.string.datos_almacenamiento_uso, mb(it.total)) }
+                        ?: stringResource(R.string.datos_almacenamiento_calculando),
                     icon = Icons.Default.Storage,
                     onClick = { dlgAlmacenamiento = true }
                 )
@@ -496,6 +533,18 @@ fun SettingsToggleItem(
         trailingContent = { Switch(checked = checked, onCheckedChange = { onToggle() }) },
         modifier = Modifier.clickable { onToggle() }
     )
+}
+
+private fun mb(bytes: Long): Int = ((bytes + 512 * 1024) / (1024 * 1024)).toInt()
+
+/** Una fila de Ajustes ▸ Almacenamiento: qué es y cuánto ocupa ("…" mientras se calcula). */
+@Composable
+private fun FilaUso(titulo: String, valor: String?, destacada: Boolean = false) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(titulo, Modifier.weight(1f), fontWeight = if (destacada) FontWeight.SemiBold else FontWeight.Normal)
+        Text(valor ?: "…", fontWeight = if (destacada) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (destacada) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
+    }
 }
 
 @Composable
@@ -599,6 +648,7 @@ private fun DialogoRespaldoImportado(
                 if (r.ajustes) Text(stringResource(R.string.respaldo_importado_ajustes))
                 if (r.cola) Text(stringResource(R.string.respaldo_importado_cola))
                 if (r.descartados > 0) Text(pluralStringResource(R.plurals.respaldo_descartados, r.descartados, r.descartados))
+                if (r.perfilesOmitidos > 0) Text(pluralStringResource(R.plurals.respaldo_perfiles_omitidos, r.perfilesOmitidos, r.perfilesOmitidos))
                 if (r.porDescargar.isNotEmpty())
                     Text(pluralStringResource(R.plurals.respaldo_por_descargar, r.porDescargar.size, r.porDescargar.size))
             }

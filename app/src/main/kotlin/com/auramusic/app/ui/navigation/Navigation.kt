@@ -3,6 +3,7 @@ package com.auramusic.app.ui.navigation
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -71,6 +72,16 @@ fun AuraNavHost(navController: NavHostController, playerViewModel: PlayerViewMod
         },
         popExitTransition = {
             if (entrePestanas(initialState, targetState)) salidaPestana() else salidaDetalle(1)
+        },
+        // Con el gesto de atrás (Android 14+) NavHost usa estas y no las de arriba. Las
+        // de serie encogen la pantalla al 70 % sin fundirla y al soltar el dedo
+        // desaparecía de golpe (Ajustes, Me gusta…). Ahora el gesto mueve la misma
+        // transición que el botón de atrás, fundida a lo largo de todo el gesto.
+        predictivePopEnterTransition = {
+            if (entrePestanas(initialState, targetState)) entradaPestana() else entradaGesto()
+        },
+        predictivePopExitTransition = {
+            if (entrePestanas(initialState, targetState)) salidaPestana() else salidaGesto()
         }
     ) {
         composable(Screen.Home.route) {
@@ -133,6 +144,16 @@ private fun entradaDetalle(lado: Int): EnterTransition =
 private fun salidaDetalle(lado: Int): ExitTransition =
     slideOutHorizontally(Movimiento.estandar(Movimiento.MEDIA)) { it * lado / 10 } +
         fadeOut(tween(SALIDA_RAPIDA, easing = FastOutLinearInEasing))
+
+// Volver con el gesto: la transición la mueve el dedo, así que el fundido dura todo el
+// gesto (con los 90 ms de arriba, al primer movimiento la pantalla ya era invisible).
+// La que se va se desliza a la derecha y se apaga; la de debajo vuelve de la izquierda.
+private fun salidaGesto(): ExitTransition =
+    slideOutHorizontally(tween(Movimiento.MEDIA, easing = LinearEasing)) { it / 10 } +
+        fadeOut(tween(Movimiento.MEDIA, easing = LinearEasing))
+private fun entradaGesto(): EnterTransition =
+    slideInHorizontally(tween(Movimiento.MEDIA, easing = LinearEasing)) { -it / 10 } +
+        fadeIn(tween(Movimiento.MEDIA, easing = LinearEasing))
 
 private const val SALIDA_RAPIDA = 90
 private const val ESPERA_ENTRADA = 60

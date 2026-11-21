@@ -10,6 +10,7 @@ import io.ktor.client.call.*
 import io.ktor.client.engine.okhttp.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
+import io.ktor.client.statement.HttpResponse
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.CancellationException
@@ -25,6 +26,14 @@ import org.schabi.newpipe.extractor.MediaFormat
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
+
+/**
+ * User-Agent de las peticiones a YT Music. Google solo comprime la respuesta si
+ * el User-Agent dice "gzip": con "Mozilla/5.0" a secas, la página de un artista
+ * llegaba sin comprimir (~780 KB en vez de ~33 KB, 23 veces más datos) y lo
+ * mismo las búsquedas y las colas. El contenido es el mismo.
+ */
+private const val AGENTE_YTM = "Mozilla/5.0 (gzip)"
 
 @Singleton
 class InnertubeClient @Inject constructor() {
@@ -49,6 +58,19 @@ class InnertubeClient @Inject constructor() {
         }
     }
 
+    /**
+     * La petición entera (enviar, recibir, guardar y convertir la respuesta) va FUERA
+     * del hilo principal. Ktor guarda y convierte la respuesta en el hilo de quien
+     * llama (casi siempre el principal, desde un ViewModel) y las de YouTube pesan
+     * cientos de KB: en un Galaxy J7 bloqueaban la pantalla 100–250 ms en cada cambio
+     * de canción (la tarjeta del artista).
+     */
+    private suspend inline fun <T> pedir(crossinline peticion: suspend () -> T): T =
+        withContext(Dispatchers.IO) { peticion() }
+
+    /** Convierte una respuesta ya recibida fuera del hilo principal (ver [pedir]). */
+    private suspend inline fun <reified T> HttpResponse.leer(): T = withContext(Dispatchers.Default) { body<T>() }
+
     private fun webMusicContext() = buildJsonObject {
         put("client", buildJsonObject {
             put("clientName", "WEB_REMIX")
@@ -64,11 +86,11 @@ class InnertubeClient @Inject constructor() {
     /** Como [search], pero devuelve el fallo (p. ej. sin conexión) en vez de una lista vacía. */
     suspend fun buscar(query: String): Result<List<SearchItem>> {
         return try {
-            val response: JsonObject = client.post(
+            val response: JsonObject = pedir { client.post(
                 "https://music.youtube.com/youtubei/v1/search"
             ) {
                 contentType(ContentType.Application.Json)
-                header("User-Agent", "Mozilla/5.0")
+                header("User-Agent", AGENTE_YTM)
                 header("Origin", "https://music.youtube.com")
                 header("Referer", "https://music.youtube.com/")
                 header("X-YouTube-Client-Name", "67")
@@ -78,7 +100,7 @@ class InnertubeClient @Inject constructor() {
                     put("query", query)
                     put("params", "EgWKAQIIAWoKEAoQAxAEEAkQBQ==")
                 })
-            }.body()
+            }.body() }
             Result.success(parseSearchResults(response))
         } catch (e: CancellationException) {
             throw e
@@ -92,9 +114,9 @@ class InnertubeClient @Inject constructor() {
     // tarjeta con el resultado más probable (artista o canción) y una lista mixta
     // donde vienen los artistas. Las canciones se siguen sacando de [buscar].
     suspend fun buscarTodo(query: String): Result<ResultadoBusqueda> = try {
-        val response: JsonObject = client.post("https://music.youtube.com/youtubei/v1/search") {
+        val response: JsonObject = pedir { client.post("https://music.youtube.com/youtubei/v1/search") {
             contentType(ContentType.Application.Json)
-            header("User-Agent", "Mozilla/5.0")
+            header("User-Agent", AGENTE_YTM)
             header("Origin", "https://music.youtube.com")
             header("Referer", "https://music.youtube.com/")
             header("X-YouTube-Client-Name", "67")
@@ -103,7 +125,7 @@ class InnertubeClient @Inject constructor() {
                 put("context", webMusicContext())
                 put("query", query)
             })
-        }.body()
+        }.body() }
         Result.success(parseBusquedaCompleta(response))
     } catch (e: CancellationException) {
         throw e
@@ -113,9 +135,9 @@ class InnertubeClient @Inject constructor() {
 
     /** Solo artistas (chip "Artistas" de la búsqueda): el filtro de artistas de YT Music. */
     suspend fun buscarArtistas(query: String): Result<List<ArtistaItem>> = try {
-        val response: JsonObject = client.post("https://music.youtube.com/youtubei/v1/search") {
+        val response: JsonObject = pedir { client.post("https://music.youtube.com/youtubei/v1/search") {
             contentType(ContentType.Application.Json)
-            header("User-Agent", "Mozilla/5.0")
+            header("User-Agent", AGENTE_YTM)
             header("Origin", "https://music.youtube.com")
             header("Referer", "https://music.youtube.com/")
             header("X-YouTube-Client-Name", "67")
@@ -125,7 +147,7 @@ class InnertubeClient @Inject constructor() {
                 put("query", query)
                 put("params", "EgWKAQIgAWoKEAoQAxAEEAkQBQ==")
             })
-        }.body()
+        }.body() }
         val secciones = response["contents"]?.jsonObject
             ?.get("tabbedSearchResultsRenderer")?.jsonObject
             ?.get("tabs")?.jsonArray?.firstOrNull()?.jsonObject
@@ -143,15 +165,15 @@ class InnertubeClient @Inject constructor() {
 
     // ── PÁGINA DE ARTISTA, ÁLBUM Y PLAYLIST (browse) ─────────────────────
     private suspend fun browse(cuerpo: JsonObjectBuilder.() -> Unit): JsonObject =
-        client.post("https://music.youtube.com/youtubei/v1/browse") {
+        pedir { client.post("https://music.youtube.com/youtubei/v1/browse") {
             contentType(ContentType.Application.Json)
-            header("User-Agent", "Mozilla/5.0")
+            header("User-Agent", AGENTE_YTM)
             header("Origin", "https://music.youtube.com")
             header("Referer", "https://music.youtube.com/")
             header("X-YouTube-Client-Name", "67")
             header("X-YouTube-Client-Version", "1.20240101.01.00")
             setBody(buildJsonObject { put("context", webMusicContext()); cuerpo() })
-        }.body()
+        }.body() }
 
     /**
      * Página de un artista de YT Music: cabecera, canciones populares (y el id de
@@ -307,9 +329,9 @@ class InnertubeClient @Inject constructor() {
 
     /** Canciones de una cola de YT Music (botones Aleatorio y Mix de un artista). */
     suspend fun colaDePlaylist(lista: PlaylistRef): List<SearchItem> = try {
-        val response: JsonObject = client.post("https://music.youtube.com/youtubei/v1/next") {
+        val response: JsonObject = pedir { client.post("https://music.youtube.com/youtubei/v1/next") {
             contentType(ContentType.Application.Json)
-            header("User-Agent", "Mozilla/5.0")
+            header("User-Agent", AGENTE_YTM)
             header("Origin", "https://music.youtube.com")
             header("Referer", "https://music.youtube.com/")
             header("X-YouTube-Client-Name", "67")
@@ -320,7 +342,7 @@ class InnertubeClient @Inject constructor() {
                 lista.params?.let { put("params", Uri.decode(it)) }
                 put("isAudioOnly", true)
             })
-        }.body()
+        }.body() }
         parseNextRadio(response, semilla = "")
     } catch (e: CancellationException) {
         throw e
@@ -330,17 +352,17 @@ class InnertubeClient @Inject constructor() {
 
     suspend fun getSearchSuggestions(query: String): List<String> {
         return try {
-            val response: JsonObject = client.post(
+            val response: JsonObject = pedir { client.post(
                 "https://music.youtube.com/youtubei/v1/music/get_search_suggestions"
             ) {
                 contentType(ContentType.Application.Json)
-                header("User-Agent", "Mozilla/5.0")
+                header("User-Agent", AGENTE_YTM)
                 header("Origin", "https://music.youtube.com")
                 setBody(buildJsonObject {
                     put("context", webMusicContext())
                     put("input", query)
                 })
-            }.body()
+            }.body() }
             response["contents"]?.jsonArray
                 ?.flatMap {
                     it.jsonObject["searchSuggestionsSectionRenderer"]
@@ -362,11 +384,11 @@ class InnertubeClient @Inject constructor() {
     suspend fun relacionadasYtm(videoId: String): List<SearchItem> {
         if (videoId.isBlank()) return emptyList()
         return try {
-            val response: JsonObject = client.post(
+            val response: JsonObject = pedir { client.post(
                 "https://music.youtube.com/youtubei/v1/next"
             ) {
                 contentType(ContentType.Application.Json)
-                header("User-Agent", "Mozilla/5.0")
+                header("User-Agent", AGENTE_YTM)
                 header("Origin", "https://music.youtube.com")
                 header("Referer", "https://music.youtube.com/")
                 header("X-YouTube-Client-Name", "67")
@@ -377,7 +399,7 @@ class InnertubeClient @Inject constructor() {
                     put("playlistId", "RDAMVM$videoId")   // radio de la canción
                     put("isAudioOnly", true)
                 })
-            }.body()
+            }.body() }
             parseNextRadio(response, videoId)
         } catch (e: Exception) {
             Log.e(TAG, "next: ${e.message.sinUrls()}"); emptyList()
@@ -390,9 +412,9 @@ class InnertubeClient @Inject constructor() {
      * por la propia canción, así que se toma de ahí. Null si no se encuentra.
      */
     suspend fun cancionPorId(videoId: String): SearchItem? = try {
-        val response: JsonObject = client.post("https://music.youtube.com/youtubei/v1/next") {
+        val response: JsonObject = pedir { client.post("https://music.youtube.com/youtubei/v1/next") {
             contentType(ContentType.Application.Json)
-            header("User-Agent", "Mozilla/5.0")
+            header("User-Agent", AGENTE_YTM)
             header("Origin", "https://music.youtube.com")
             header("Referer", "https://music.youtube.com/")
             header("X-YouTube-Client-Name", "67")
@@ -403,7 +425,7 @@ class InnertubeClient @Inject constructor() {
                 put("playlistId", "RDAMVM$videoId")
                 put("isAudioOnly", true)
             })
-        }.body()
+        }.body() }
         parseNextRadio(response, semilla = "", soloId = videoId).firstOrNull()
     } catch (e: Exception) {
         Log.w(TAG, "cancionPorId: ${e.message.sinUrls()}"); null
@@ -464,16 +486,22 @@ class InnertubeClient @Inject constructor() {
         urlsResueltas.keys.removeAll { it.startsWith("$videoId|") }
     }
 
-    suspend fun getAudioUrl(videoId: String, calidad: AudioQuality, codec: CodecAudio): AudioInfo? {
+    /**
+     * [preferido]: el archivo que ya hay a medias en la caché. Si YouTube aún lo ofrece
+     * se devuelve ese, para no mezclar bytes de dos archivos distintos.
+     */
+    suspend fun getAudioUrl(
+        videoId: String, calidad: AudioQuality, codec: CodecAudio, preferido: ArchivoAudio? = null
+    ): AudioInfo? {
         Log.d(TAG, "=== getAudioUrl($videoId, $calidad, $codec) ===")
-        val clave = "$videoId|$calidad|$codec"
+        val clave = "$videoId|$calidad|$codec" + preferido?.let { "|${it.itag}|${it.clen}" }.orEmpty()
         urlsResueltas[clave]?.let { guardada ->
             if (System.currentTimeMillis() < guardada.caducaMs) return guardada.info
             urlsResueltas.remove(clave)
         }
 
         val nueva = scopeResolucion.async(start = CoroutineStart.LAZY) {
-            resolverConReintento(videoId, calidad, codec, clave)
+            resolverConReintento(videoId, calidad, codec, clave, preferido)
         }
         val tarea = enCurso.putIfAbsent(clave, nueva)
         if (tarea != null) { nueva.cancel(); return tarea.await() }
@@ -483,7 +511,7 @@ class InnertubeClient @Inject constructor() {
     }
 
     private suspend fun resolverConReintento(
-        videoId: String, calidad: AudioQuality, codec: CodecAudio, clave: String
+        videoId: String, calidad: AudioQuality, codec: CodecAudio, clave: String, preferido: ArchivoAudio?
     ): AudioInfo? {
         // Única fuente: NewPipe Extractor (descifra localmente y resuelve el poToken).
         // Medido 2026-10: los clientes Innertube directos (TVHTML5_SIMPLY_EMBEDDED,
@@ -494,7 +522,7 @@ class InnertubeClient @Inject constructor() {
         // en todas las calidades; pedirlas de nuevo a NewPipe lo resuelve. Cada URL
         // se comprueba con una petición de 1 byte (~100 ms) antes de devolverla.
         repeat(INTENTOS_AUDIO) { intento ->
-            val info = tryNewPipe(videoId, calidad, codec) ?: return@repeat
+            val info = tryNewPipe(videoId, calidad, codec, preferido) ?: return@repeat
             when (comprobarUrl(info.url)) {
                 EstadoUrl.VALIDA -> {
                     Log.d(TAG, "✅ NewPipe (intento ${intento + 1}): ${info.mimeType} ${info.bitrate}kbps")
@@ -533,15 +561,26 @@ class InnertubeClient @Inject constructor() {
     }
 
     // ── NewPipe Extractor ──────────────────────────────────────────────
-    private suspend fun tryNewPipe(videoId: String, calidad: AudioQuality, codec: CodecAudio): AudioInfo? =
+    // Tamaño real del archivo: va en la URL (clen) y, si no, en los datos del itag.
+    private fun tamanoDe(stream: org.schabi.newpipe.extractor.stream.AudioStream): Long =
+        runCatching { Uri.parse(stream.content).getQueryParameter("clen")?.toLongOrNull() }.getOrNull()
+            ?: stream.itagItem?.contentLength?.takeIf { it > 0 } ?: 0L
+
+    private suspend fun tryNewPipe(
+        videoId: String, calidad: AudioQuality, codec: CodecAudio, preferido: ArchivoAudio?
+    ): AudioInfo? =
         withContext(Dispatchers.IO) {
             return@withContext try {
                 val url = "https://www.youtube.com/watch?v=$videoId"
                 Log.d(TAG, "NewPipe: extracting $url")
-                val info = org.schabi.newpipe.extractor.stream.StreamInfo
-                    .getInfo(org.schabi.newpipe.extractor.ServiceList.YouTube, url)
+                // Solo el audio: StreamInfo.getInfo además extrae vídeo, DASH, HLS,
+                // subtítulos y los vídeos relacionados (con sus fechas, que NewPipe lee
+                // compilando expresiones regulares). En un Galaxy J7 eso era ~1/3 de
+                // la CPU de fondo de cada cambio de canción, para nada que se use.
+                val extractor = org.schabi.newpipe.extractor.ServiceList.YouTube.getStreamExtractor(url)
+                extractor.fetchPage()
 
-                val streams = info.audioStreams
+                val streams = extractor.audioStreams
                 Log.d(TAG, "NewPipe: ${streams.size} audio streams")
                 if (streams.isEmpty()) return@withContext null
 
@@ -559,16 +598,25 @@ class InnertubeClient @Inject constructor() {
                     }
                 }.ifEmpty { direct }
                 val porBitrate = delCodec.sortedBy { it.averageBitrate }
-                val chosen = when (calidad) {
+                // El archivo que ya está a medias en la caché, si YouTube aún lo da.
+                val mismoArchivo = preferido?.let { p ->
+                    direct.firstOrNull { it.itag == p.itag && (p.clen <= 0L || tamanoDe(it) == p.clen) }
+                }
+                val chosen = mismoArchivo ?: when (calidad) {
                     AudioQuality.LOW    -> porBitrate.first()
-                    AudioQuality.MEDIUM -> porBitrate.minBy { kotlin.math.abs(it.averageBitrate - 128) }
+                    // Opus ~70; con AAC ("Ahorro de batería" o sin Opus) se queda en 128,
+                    // no en 48, que es el otro AAC que da YouTube.
+                    AudioQuality.MEDIUM -> {
+                        val objetivo = if (porBitrate.all { it.format == MediaFormat.M4A }) 128 else 70
+                        porBitrate.minBy { kotlin.math.abs(it.averageBitrate - objetivo) }
+                    }
                     AudioQuality.HIGH   -> porBitrate.last()
                 }
                 val streamUrl = chosen.content ?: return@withContext null
 
                 Log.d(TAG, "NewPipe URL: ${streamUrl.take(80)}...")
                 AudioInfo(streamUrl, chosen.averageBitrate,
-                    chosen.format?.mimeType ?: "audio/mp4")
+                    chosen.format?.mimeType ?: "audio/mp4", ArchivoAudio(chosen.itag, tamanoDe(chosen)))
             } catch (e: Exception) {
                 Log.w(TAG, "NewPipe: ${e.javaClass.simpleName}: ${e.message.sinUrls()?.take(120)}")
                 null
@@ -579,48 +627,78 @@ class InnertubeClient @Inject constructor() {
     // R: orden de prioridad → LRCLIB; si no encuentra, KuGou como fallback. Si
     // ninguno tiene la letra, null (la UI muestra "no disponible"). Vale igual
     // para streaming y para descargas (el .lrc se guarda de lo que devuelva esto).
+    //
+    // Una letra sincronizada solo vale si es de la MISMA versión que suena: la del
+    // videoclip o una en directo tienen otra intro y quedaba desfasada hasta 20 s.
+    // Por eso se elige por duración (±TOLERANCIA_LETRA_S) y, si ninguna coincide o
+    // no se sabe la duración, se muestra la letra sin sincronizar.
     suspend fun getLyrics(title: String, artist: String, durationSec: Int): LyricsResult? {
-        letrasLrclib(title, artist, durationSec)?.let { return it }
-        letrasKugou(title, artist, durationSec)?.let { return it }
-        return null
+        val lrclib = candidatasLrclib(title, artist, durationSec)
+        if (durationSec > 0) {
+            lrclib.filter { !it.sincronizada.isNullOrBlank() && it.encaja(durationSec) }
+                .minByOrNull { kotlin.math.abs(it.duracionS - durationSec) }
+                ?.let { c -> parseLrc(c.sincronizada!!).takeIf { it.isNotEmpty() }?.let { return LyricsResult(it, true, "LRCLIB") } }
+            letrasKugou(title, artist, durationSec, exigirDuracion = true)?.let { return it }
+        }
+        // Sin versión que coincida: la letra igual sirve, pero sin resaltar líneas.
+        val cercana = lrclib.minByOrNull { if (durationSec > 0) kotlin.math.abs(it.duracionS - durationSec) else 0.0 }
+        val texto = lrclib.sortedBy { if (it === cercana) 0 else 1 }.firstNotNullOfOrNull { c ->
+            c.plana?.takeIf { it.isNotBlank() }
+                ?: c.sincronizada?.let { s -> parseLrc(s).joinToString("\n") { it.text } }?.takeIf { it.isNotBlank() }
+        }
+        if (texto != null) return sinSincronizar(texto.lines(), "LRCLIB")
+        return letrasKugou(title, artist, durationSec, exigirDuracion = false)
+            ?.let { sinSincronizar(it.lines.map { l -> l.text }, it.source) }
     }
 
-    private suspend fun letrasLrclib(title: String, artist: String, durationSec: Int): LyricsResult? {
-        return try {
-            val r = tryLrclib(title, artist, durationSec)
-                ?: tryLrclibSearch(title, artist) ?: return null
-            val synced = r["syncedLyrics"]?.jsonPrimitive?.contentOrNull
-            val plain  = r["plainLyrics"]?.jsonPrimitive?.contentOrNull
-            when {
-                !synced.isNullOrBlank() -> LyricsResult(parseLrc(synced), true, "LRCLIB")
-                !plain.isNullOrBlank()  -> LyricsResult(
-                    plain.split("\n").mapIndexed { i, l -> LyricLine(i * 3000L, l) }, false, "LRCLIB"
-                )
-                else -> null
-            }
-        } catch (e: Exception) { null }
+    private fun sinSincronizar(lineas: List<String>, fuente: String): LyricsResult? =
+        lineas.filter { it.isNotBlank() }.takeIf { it.isNotEmpty() }
+            ?.let { l -> LyricsResult(l.mapIndexed { i, t -> LyricLine(i * 3000L, t) }, false, fuente) }
+
+    private class CandidataLrclib(val duracionS: Double, val sincronizada: String?, val plana: String?) {
+        fun encaja(durationSec: Int) = duracionS > 0 && kotlin.math.abs(duracionS - durationSec) <= TOLERANCIA_LETRA_S
+    }
+
+    private fun candidataDe(o: JsonObject) = CandidataLrclib(
+        o["duration"]?.jsonPrimitive?.doubleOrNull ?: 0.0,
+        o["syncedLyrics"]?.jsonPrimitive?.contentOrNull,
+        o["plainLyrics"]?.jsonPrimitive?.contentOrNull
+    )
+
+    // /api/get (si se sabe la duración) y /api/search: LRCLIB a veces devuelve en /get
+    // otra versión aunque la duración no coincida, así que también se comprueba.
+    private suspend fun candidatasLrclib(title: String, artist: String, durationSec: Int): List<CandidataLrclib> {
+        val exacta = if (durationSec > 0) tryLrclib(title, artist, durationSec) else null
+        return (listOfNotNull(exacta) + tryLrclibSearch(title, artist)).map { candidataDe(it) }
     }
 
     // Fallback KuGou (R): busca candidatos y baja la letra en formato lrc (viene en
     // base64). Usa https para respetar la política de cleartext de la app.
-    private suspend fun letrasKugou(title: String, artist: String, durationSec: Int): LyricsResult? {
+    private suspend fun letrasKugou(
+        title: String, artist: String, durationSec: Int, exigirDuracion: Boolean
+    ): LyricsResult? {
         return try {
             val keyword = if (artist.isNotBlank()) "$artist - $title" else title
-            val busqueda: JsonObject = client.get("https://lyrics.kugou.com/search") {
+            val busqueda: JsonObject = pedir { client.get("https://lyrics.kugou.com/search") {
                 parameter("ver", 1); parameter("man", "yes"); parameter("client", "mobi")
                 parameter("keyword", keyword)
                 if (durationSec > 0) parameter("duration", durationSec * 1000)
                 header("User-Agent", "Mozilla/5.0")
-            }.body()
-            val cand = busqueda["candidates"]?.jsonArray?.firstOrNull()?.jsonObject ?: return null
+            }.body() }
+            // KuGou da la duración de cada candidata en milisegundos.
+            val candidatas = busqueda["candidates"]?.jsonArray?.map { it.jsonObject }.orEmpty()
+            val cand = (if (exigirDuracion) candidatas.firstOrNull { c ->
+                val ms = c["duration"]?.jsonPrimitive?.longOrNull ?: 0L
+                ms > 0 && kotlin.math.abs(ms / 1000.0 - durationSec) <= TOLERANCIA_LETRA_S
+            } else candidatas.firstOrNull()) ?: return null
             val id = cand["id"]?.jsonPrimitive?.content ?: return null
             val accesskey = cand["accesskey"]?.jsonPrimitive?.content ?: return null
 
-            val descarga: JsonObject = client.get("https://lyrics.kugou.com/download") {
+            val descarga: JsonObject = pedir { client.get("https://lyrics.kugou.com/download") {
                 parameter("ver", 1); parameter("client", "pc"); parameter("id", id)
                 parameter("accesskey", accesskey); parameter("fmt", "lrc"); parameter("charset", "utf8")
                 header("User-Agent", "Mozilla/5.0")
-            }.body()
+            }.body() }
             val b64 = descarga["content"]?.jsonPrimitive?.content ?: return null
             val lrc = String(android.util.Base64.decode(b64, android.util.Base64.DEFAULT))
             // KuGou suele abrir con una línea "Artista - Título" que no se canta.
@@ -628,6 +706,8 @@ class InnertubeClient @Inject constructor() {
                 l.text.isBlank() || (l.text.contains(" - ") && l.text.contains(title, ignoreCase = true))
             }
             if (lineas.isNotEmpty()) LyricsResult(lineas, true, "KuGou") else null
+        } catch (e: CancellationException) {
+            throw e   // cambió la canción: no seguir pidiendo
         } catch (e: Exception) {
             Log.w(TAG, "KuGou: ${e.message.sinUrls()?.take(80)}"); null
         }
@@ -638,26 +718,30 @@ class InnertubeClient @Inject constructor() {
     fun parsearLrcLocal(contenido: String): LyricsResult? {
         val sincronizadas = parseLrc(contenido)
         if (sincronizadas.isNotEmpty()) return LyricsResult(sincronizadas, true, "Descargada")
-        val planas = contenido.lines().filter { it.isNotBlank() }
+        // Las etiquetas ([length:], [ar:], [offset:]…) no son versos.
+        val etiqueta = Regex("""^\[[A-Za-z]+:.*]$""")
+        val planas = contenido.lines().map { it.trim() }.filter { it.isNotBlank() && !etiqueta.matches(it) }
             .mapIndexed { i, l -> LyricLine(i * 3000L, l) }
         return if (planas.isEmpty()) null else LyricsResult(planas, false, "Descargada")
     }
 
     private suspend fun tryLrclib(t: String, a: String, d: Int): JsonObject? = try {
-        val r = client.get("https://lrclib.net/api/get") {
-            parameter("track_name", t); parameter("artist_name", a); parameter("duration", d)
-            header("User-Agent", "AuraMusic/6.0")
+        val r = pedir {
+            client.get("https://lrclib.net/api/get") {
+                parameter("track_name", t); parameter("artist_name", a); parameter("duration", d)
+                header("User-Agent", "AuraMusic/6.0")
+            }
         }
-        if (r.status.value == 200) r.body() else null
-    } catch (e: Exception) { null }
+        if (r.status.value == 200) r.leer() else null
+    } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
 
-    private suspend fun tryLrclibSearch(t: String, a: String): JsonObject? = try {
-        val r: JsonArray = client.get("https://lrclib.net/api/search") {
+    private suspend fun tryLrclibSearch(t: String, a: String): List<JsonObject> = try {
+        val r: JsonArray = pedir { client.get("https://lrclib.net/api/search") {
             parameter("track_name", t); parameter("artist_name", a)
             header("User-Agent", "AuraMusic/6.0")
-        }.body()
-        r.firstOrNull()?.jsonObject
-    } catch (e: Exception) { null }
+        }.body() }
+        r.mapNotNull { it as? JsonObject }
+    } catch (e: CancellationException) { throw e } catch (e: Exception) { emptyList() }
 
     /**
      * Las líneas VACÍAS se conservan: en LRCLIB marcan el final de un verso o un
@@ -864,6 +948,11 @@ data class PaginaColeccion(
     val autor: String, val autorId: String?, val autorFotoUrl: String,
     val portadaUrl: String, val pie: String, val canciones: List<SearchItem>, val esAlbum: Boolean
 )
-data class AudioInfo(val url: String, val bitrate: Int, val mimeType: String)
+/** Diferencia máxima de duración para dar por buena una letra sincronizada. */
+private const val TOLERANCIA_LETRA_S = 3
+
+/** Identifica el archivo exacto de YouTube: dos con la misma calidad pueden ser distintos. */
+data class ArchivoAudio(val itag: Int, val clen: Long)
+data class AudioInfo(val url: String, val bitrate: Int, val mimeType: String, val archivo: ArchivoAudio? = null)
 data class LyricLine(val timeMs: Long, val text: String)
 data class LyricsResult(val lines: List<LyricLine>, val isSynced: Boolean, val source: String)

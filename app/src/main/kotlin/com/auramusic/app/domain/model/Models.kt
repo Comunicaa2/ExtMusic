@@ -19,7 +19,7 @@ enum class OrigenCancion { LOCAL, YOUTUBE }
 /** Calidad de audio para reproducción y descargas. */
 enum class AudioQuality(val label: String, val description: String) {
     LOW   ("Ahorro de datos", "~50 kbps"),
-    MEDIUM("Normal",          "~128 kbps · AAC"),
+    MEDIUM("Normal",          "~70 kbps · Opus"),
     HIGH  ("Máxima",          "~160 kbps · Opus"),
 }
 
@@ -27,11 +27,15 @@ enum class AudioQuality(val label: String, val description: String) {
  * Cada nivel fija su códec: es la combinación que da ese bitrate en YouTube
  * (AAC 48/128 kbps, Opus 50/70/160 kbps). Así el usuario elige solo "calidad"
  * y no hay combinaciones engañosas como Máxima + AAC = 128 kbps.
+ *
+ * Normal es Opus ~70 kbps (antes AAC 128): para quien escucha con el altavoz o
+ * auriculares normales suena casi igual que Máxima y ocupa casi la mitad (~2,3 MB
+ * por canción de 4 min frente a ~4 MB). AAC 128 ocupaba lo mismo que Máxima.
  */
 val AudioQuality.codec: CodecAudio
     get() = when (this) {
         AudioQuality.LOW    -> CodecAudio.OPUS
-        AudioQuality.MEDIUM -> CodecAudio.AAC
+        AudioQuality.MEDIUM -> CodecAudio.OPUS
         AudioQuality.HIGH   -> CodecAudio.OPUS
     }
 
@@ -43,7 +47,7 @@ val AudioQuality.formatoDescarga: FormatoDescarga
 val AudioQuality.kbpsAprox: Int
     get() = when (this) {
         AudioQuality.LOW    -> 50
-        AudioQuality.MEDIUM -> 128
+        AudioQuality.MEDIUM -> 70
         AudioQuality.HIGH   -> 160
     }
 
@@ -101,7 +105,7 @@ data class AppSettings(
     val cachearStreams: Boolean = true,
     // ── Calidad de audio ───────────────────────────────────────────────────
     val audioQuality: AudioQuality = AudioQuality.HIGH,
-    val downloadQuality: AudioQuality = AudioQuality.HIGH,
+    val downloadQuality: AudioQuality = AudioQuality.MEDIUM,   // Normal: ocupa casi la mitad
     // ── Descargas ──────────────────────────────────────────────────────────
     val formatoDescarga: FormatoDescarga = FormatoDescarga.M4A,
     val descargarAlDarLike: Boolean = false,   // P: al dar me gusta, descarga en caché
@@ -113,7 +117,8 @@ data class AppSettings(
     // ── Biblioteca local ───────────────────────────────────────────────────
     val carpetasEscaneo: String = "",          // "" = todo el dispositivo
     // ── Caché ──────────────────────────────────────────────────────────────
-    val cacheMaximoMb: Int = 256,
+    // Audio ya escuchado que se guarda en disco (ver LimiteCacheAudio). Rango 50–500.
+    val cacheMaximoMb: Int = CACHE_AUDIO_DEFECTO_MB,
     // ── Letras ─────────────────────────────────────────────────────────────
     val showLyrics: Boolean = true,
     val letrasAutomaticas: Boolean = true,
@@ -141,4 +146,25 @@ fun claveCancion(titulo: String, artista: String): String {
         .replace(Regex("\\s+"), " ").trim()
     val primerArtista = artista.split(",", "&", " y ", " x ", " feat", " ft.").first().removeSuffix(" - Topic")
     return limpiar(titulo) + "|" + limpiar(primerArtista)
+}
+
+// ── Espacio en disco (iguales en todos los teléfonos) ────────────────────────
+// Antes: 256 MB de audio por defecto (ajustable hasta 1 GB) y 250 MB de portadas;
+// una noche sonando bastaba para llenar ~1 GB contando descargas y datos.
+const val CACHE_AUDIO_DEFECTO_MB = 100
+const val CACHE_AUDIO_MIN_MB = 50
+const val CACHE_AUDIO_MAX_MB = 500
+const val CACHE_PORTADAS_MB = 50L
+/** Con menos espacio libre que esto en el teléfono, el audio temporal baja a [CACHE_AUDIO_POCO_ESPACIO_MB]. */
+const val ESPACIO_LIBRE_MIN_MB = 1024L
+const val CACHE_AUDIO_POCO_ESPACIO_MB = 32L
+
+/**
+ * Límite de audio guardado a partir de lo que haya en ajustes o en un backup.
+ * 256 era el valor por defecto antiguo y lo escribía cualquier backup restaurado,
+ * así que se toma como "sin elegir" (pasa al nuevo por defecto).
+ */
+fun limiteCacheAudioMb(guardado: Int?): Int = when (guardado) {
+    null, 256 -> CACHE_AUDIO_DEFECTO_MB
+    else -> guardado.coerceIn(CACHE_AUDIO_MIN_MB, CACHE_AUDIO_MAX_MB)
 }

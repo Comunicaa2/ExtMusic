@@ -130,9 +130,14 @@
     <string name="sec_tus_datos">Tus datos</string>
     <string name="datos_musica_telefono">Música del teléfono</string>
     <string name="datos_almacenamiento">Almacenamiento</string>
-    <string name="datos_almacenamiento_uso">Caché: %1$d MB de %2$d MB</string>
+    <string name="datos_almacenamiento_uso">La app ocupa %1$d MB</string>
     <string name="datos_almacenamiento_calculando">Calculando…</string>
-    <string name="datos_almacenamiento_explica">Lo que ya escuchaste se guarda un tiempo para no volver a descargarlo. Tus descargas no se tocan.</string>
+    <string name="datos_almacenamiento_explica">Lo que ya escuchaste y las portadas se guardan un tiempo para no volver a descargarlos, siempre dentro de estos límites. Tus descargas no se tocan.</string>
+    <string name="almacenamiento_audio">Audio temporal</string>
+    <string name="almacenamiento_portadas">Portadas</string>
+    <string name="almacenamiento_descargas">Descargas</string>
+    <string name="almacenamiento_total">Total de la app</string>
+    <string name="almacenamiento_de">%1$d de %2$d MB</string>
 
     <!-- Backup de la biblioteca -->
     <string name="respaldo_exportar">Exportar backup</string>
@@ -233,11 +238,11 @@
     <string name="bib_actualizada">Biblioteca actualizada</string>
 
     <!-- Caché -->
-    <string name="cache_tamano">Espacio máximo</string>
-    <string name="cache_tamano_desc">Límite del audio guardado en disco (se aplica al reiniciar la app)</string>
+    <string name="cache_tamano">Máximo de audio temporal</string>
+    <string name="cache_tamano_desc">Se aplica al momento. Si al teléfono le queda poco espacio, la app guarda mucho menos.</string>
     <string name="cache_mb">%1$d MB</string>
     <string name="cache_limpiar">Liberar espacio</string>
-    <string name="cache_limpiar_desc">Borra el audio guardado temporalmente</string>
+    <string name="cache_limpiar_desc">Borra el audio temporal y las portadas guardadas. Descargas, Me gusta y playlists no se tocan.</string>
     <string name="cache_limpiada">Espacio liberado</string>
     <string name="cache_uso_actual">En uso: %1$s</string>
 
@@ -262,7 +267,7 @@
     <string name="calidad_media">Normal</string>
     <string name="calidad_alta">Máxima</string>
     <string name="calidad_baja_desc">~50 kbps</string>
-    <string name="calidad_media_desc">~128 kbps · AAC</string>
+    <string name="calidad_media_desc">~70 kbps · Opus</string>
     <string name="calidad_alta_desc">~160 kbps · Opus</string>
 
 
@@ -353,6 +358,33 @@
     <string name="error_timeout_repro">No se pudo reproducir esta canción (tardó demasiado). Inténtalo de nuevo.</string>
     <string name="error_reproduccion">Error de reproducción (%1$d)</string>
     <string name="error_sin_audio">No se pudo obtener el audio.\nPrueba con otra canción.</string>
+    <!-- Perfiles de gusto -->
+    <string name="perfiles_titulo">Perfiles de gusto</string>
+    <string name="perfiles_desc">Cada perfil tiene su propio historial, recomendaciones, Me gusta y playlists. Las descargas son de todos.</string>
+    <string name="perfil_activo">En uso</string>
+    <string name="perfil_nuevo">Nuevo perfil</string>
+    <string name="perfil_nuevo_explica">Empieza vacío: lo que escuches con él no cambia lo que te sale en los demás.</string>
+    <string name="perfil_gestionar">Gestionar perfiles</string>
+    <string name="perfil_nombre">Nombre</string>
+    <string name="perfil_renombrar">Cambiar nombre</string>
+    <string name="perfil_borrar">Borrar perfil</string>
+    <string name="perfil_borrar_confirmar">Se borrarán el historial, los Me gusta y las playlists de «%1$s». Las descargas no se tocan.</string>
+    <string name="perfil_limite">Máximo %1$d perfiles</string>
+    <!-- No recomendar -->
+    <string name="menu_no_recomendar">No recomendar</string>
+    <string name="menu_volver_recomendar">Volver a recomendar</string>
+    <string name="no_recomendar_hecho">No te la volveremos a sugerir. Puedes deshacerlo en Ajustes.</string>
+    <string name="no_recomendar_deshecho">Vuelve a poder salir en tus sugerencias</string>
+    <string name="no_recomendadas_titulo">Canciones no recomendadas</string>
+    <string name="no_recomendadas_desc">Las que marcaste para que no te salgan en este perfil</string>
+    <string name="no_recomendadas_vacio">No has marcado ninguna.</string>
+    <string name="no_recomendadas_devolver">Devolver</string>
+    <plurals name="respaldo_perfiles_omitidos">
+        <item quantity="one">%1$d perfil no se importó: ya tienes el máximo.</item>
+        <item quantity="other">%1$d perfiles no se importaron: ya tienes el máximo.</item>
+    </plurals>
+    <string name="home_no_actualizado">No se pudo actualizar. Revisa tu conexión.</string>
+    <string name="error_cancion_saltada">No se pudo reproducir «%1$s». Pasando a la siguiente.</string>
 
     <!-- Plural: número de canciones de un artista -->
     <plurals name="n_canciones">

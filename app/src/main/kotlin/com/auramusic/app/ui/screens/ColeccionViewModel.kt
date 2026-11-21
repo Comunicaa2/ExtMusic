@@ -6,6 +6,7 @@ import androidx.room.withTransaction
 import com.auramusic.app.data.api.InnertubeClient
 import com.auramusic.app.data.api.PaginaColeccion
 import com.auramusic.app.data.db.AuraDatabase
+import com.auramusic.app.data.db.PERFIL_PRINCIPAL
 import com.auramusic.app.data.db.PlaylistEntity
 import com.auramusic.app.data.db.PlaylistSongCrossRef
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -71,7 +72,8 @@ class ColeccionViewModel @Inject constructor(
                 val existentes = songDao.todosLosIds().toSet()
                 songDao.upsert(p.canciones.filter { it.videoId !in existentes }.map { it.toSongEntity() })
                 val id = UUID.randomUUID().toString()
-                playlistDao.insert(PlaylistEntity(id = id, name = p.titulo))
+                playlistDao.insert(PlaylistEntity(id = id, name = p.titulo,
+                    perfilId = playlistDao.perfilActivo() ?: PERFIL_PRINCIPAL))
                 playlistDao.relacionarSiNoExisten(p.canciones.mapIndexed { i, c ->
                     PlaylistSongCrossRef(playlistId = id, songId = c.videoId, position = i)
                 })

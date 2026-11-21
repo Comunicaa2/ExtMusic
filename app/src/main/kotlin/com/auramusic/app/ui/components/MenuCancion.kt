@@ -6,6 +6,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Downloading
@@ -106,12 +108,13 @@ fun MenuCancion(cancion: SongEntity, playerViewModel: PlayerViewModel, navContro
                     navController.navigate(Screen.Artist.createRoute(extractMainArtist(cancion.artist),
                         cancion.artistId.ifBlank { null }))
                 })
+            OpcionNoRecomendar(cancion, playerViewModel, alCerrar = { abierto = false })
         }
     }
 
     if (elegirPlaylist) {
         val playlistVm: PlaylistViewModel = hiltViewModel()
-        val playlists by playlistVm.playlists.collectAsStateWithLifecycle(emptyList())
+        val playlists = playlistVm.playlists.collectAsStateWithLifecycle().value.orEmpty()
         // Una canción que nunca sonó aún no está en la BD: se guarda antes de añadirla.
         AddToPlaylistDialog(
             playlists = playlists,
@@ -133,4 +136,28 @@ fun MenuCancion(cancion: SongEntity, playerViewModel: PlayerViewModel, navContro
             onDismiss = { elegirPlaylist = false }
         )
     }
+}
+
+/**
+ * ⋮ "No recomendar" / "Volver a recomendar" (también en el menú del reproductor):
+ * la canción deja de salir en sugerencias, radio y mixes del perfil activo. Me
+ * gusta, playlists y descargas no se tocan.
+ */
+@Composable
+fun OpcionNoRecomendar(cancion: SongEntity, playerViewModel: PlayerViewModel, alCerrar: () -> Unit) {
+    val contexto = LocalContext.current
+    val recursos = LocalResources.current
+    val claves by playerViewModel.clavesNoRecomendadas.collectAsStateWithLifecycle()
+    val marcada = cancion.id in claves
+    DropdownMenuItem(
+        text = { Text(stringResource(if (marcada) R.string.menu_volver_recomendar else R.string.menu_no_recomendar)) },
+        leadingIcon = { Icon(if (marcada) Icons.AutoMirrored.Filled.Undo else Icons.Default.Block, null) },
+        onClick = {
+            alCerrar()
+            playerViewModel.alternarNoRecomendar(cancion) { quedo ->
+                Toast.makeText(contexto, recursos.getString(
+                    if (quedo) R.string.no_recomendar_hecho else R.string.no_recomendar_deshecho), Toast.LENGTH_SHORT).show()
+            }
+        }
+    )
 }

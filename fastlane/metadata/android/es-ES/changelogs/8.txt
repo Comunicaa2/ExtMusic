@@ -1,0 +1,7 @@
+• Nuevo cristal líquido: se adapta al fondo, reacciona al tocarlo y la pestaña activa es una gota que puedes arrastrar
+• Gesto de atrás: las pantallas, el reproductor y la letra lo siguen con el dedo
+• Mucho menos consumo: ~75 % menos datos y ~20 % menos CPU al escuchar
+• Reproductor más fluido al abrirlo y cerrarlo
+• Perfiles de gusto, "No recomendar" y deslizar para actualizar el Inicio
+• Las portadas se funden al cargar
+• Arreglo: algunos teléfonos se quedaban sin internet tras horas de uso

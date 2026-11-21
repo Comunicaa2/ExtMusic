@@ -1,0 +1,7 @@
+• New liquid glass: it adapts to the background, reacts to touch, and the active tab is a drop you can drag
+• Back gesture: screens, the player and lyrics follow your finger
+• Much lighter: ~75% less data and ~20% less CPU while listening
+• Smoother player when opening and closing
+• Taste profiles, "Don't recommend" and pull to refresh on Home
+• Cover art fades in as it loads
+• Fix: some phones lost internet after hours of use

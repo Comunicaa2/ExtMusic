@@ -1,7 +1,10 @@
 package com.auramusic.app.ui.components
 
 import android.graphics.drawable.BitmapDrawable
-import androidx.activity.compose.BackHandler
+import androidx.activity.BackEventCompat
+import androidx.activity.compose.PredictiveBackHandler
+import com.auramusic.app.ui.theme.encogerConGesto
+import kotlinx.coroutines.launch
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -250,7 +253,24 @@ fun VisorLetrasCompleto(
     onSiguiente: () -> Unit,
     onCerrar: () -> Unit
 ) {
-    BackHandler(onBack = onCerrar)
+    // Con el gesto de atrás (Android 14+) el visor se encoge siguiendo el dedo y deja
+    // ver el reproductor; al soltar se cierra como siempre y, si se cancela, vuelve.
+    // Mientras se va (la salida de AnimatedContent) sigue encogido donde quedó.
+    val gesto = remember { Animatable(0f) }
+    var desdeIzquierda by remember { mutableStateOf(true) }
+    val ambitoGesto = rememberCoroutineScope()
+    PredictiveBackHandler { progreso ->
+        try {
+            progreso.collect { e ->
+                desdeIzquierda = e.swipeEdge == BackEventCompat.EDGE_LEFT
+                gesto.snapTo(e.progress)
+            }
+            onCerrar()
+        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+            ambitoGesto.launch { gesto.animateTo(0f, Movimiento.estandar()) }
+            throw e
+        }
+    }
     val lineas = remember(letra) { lineasDe(letra) }
     val activo by lineaActiva(letra, lineas, posMs)
     val colorBase = rememberColorPortada(portada) ?: Color(0xFF1E2A38)
@@ -274,7 +294,7 @@ fun VisorLetrasCompleto(
     // suave y gasta mucha menos batería en gama baja.
     val giro by remember { derivedStateOf { kotlin.math.floor(giroAnim.value) } }
 
-    Box(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize().graphicsLayer { encogerConGesto(gesto.value, desdeIzquierda) }) {
         // El fondo va en su propio nodo, hermano del contenido: al girar solo se
         // vuelve a pintar él (antes cada paso regrababa también letra y controles).
         Box(Modifier.fillMaxSize().drawBehind {

@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import coil.imageLoader
 import com.auramusic.app.data.repository.BibliotecaLocalRepository
 import com.auramusic.app.data.repository.RepositorioPreferencias
 import com.auramusic.app.data.repository.RespaldoRepository
@@ -80,7 +81,12 @@ class SettingsViewModel @Inject constructor(
     fun setCarpetasEscaneo(carpetas: String) = lanzar { repositorio.guardarCarpetasEscaneo(carpetas) }
 
     // ── Caché ────────────────────────────────────────────────────────────────
-    fun setCacheMaximoMb(mb: Int) = lanzar { repositorio.guardarCacheMaximoMb(mb) }
+    // Se aplica al momento: lo que sobre se borra ya (ver LimiteCacheAudio).
+    fun setCacheMaximoMb(mb: Int, alTerminar: () -> Unit = {}) = lanzar {
+        repositorio.guardarCacheMaximoMb(mb)
+        withContext(Dispatchers.IO) { MusicService.aplicarLimiteCache(com.auramusic.app.domain.model.limiteCacheAudioMb(mb)) }
+        alTerminar()
+    }
 
     // ── Letras ───────────────────────────────────────────────────────────────
     fun toggleShowLyrics()   = lanzar { repositorio.guardarMostrarLetras(!settings.value.showLyrics) }
@@ -97,21 +103,39 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    /** Vacía la caché de audio del streaming (ver MusicService.limpiarCache). */
+    /**
+     * "Liberar espacio": vacía el audio temporal y las portadas guardadas. Nunca
+     * toca descargas, Me gusta ni playlists.
+     */
+    @OptIn(coil.annotation.ExperimentalCoilApi::class)
     fun limpiarCache(onHecho: () -> Unit) {
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { runCatching { MusicService.limpiarCache(contexto.cacheDir) } }
+            withContext(Dispatchers.IO) {
+                runCatching { MusicService.limpiarCache(contexto.cacheDir) }
+                runCatching { contexto.imageLoader.diskCache?.clear() }
+            }
+            runCatching { contexto.imageLoader.memoryCache?.clear() }
             onHecho()
         }
     }
 
-    /** Megas que ocupa ahora la caché de audio. */
-    fun usoCacheMb(onResultado: (Int) -> Unit) {
+    /** Lo que ocupa la app, por partes (en bytes). */
+    data class UsoAlmacenamiento(val audio: Long, val portadas: Long, val descargas: Long, val total: Long)
+
+    fun usoAlmacenamiento(onResultado: (UsoAlmacenamiento) -> Unit) {
         viewModelScope.launch {
-            val bytes = withContext(Dispatchers.IO) {
-                runCatching { MusicService.usoCache(contexto.cacheDir) }.getOrDefault(0L)
+            val uso = withContext(Dispatchers.IO) {
+                fun tamano(f: java.io.File) = runCatching {
+                    f.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                }.getOrDefault(0L)
+                UsoAlmacenamiento(
+                    audio = runCatching { MusicService.usoCache(contexto.cacheDir) }.getOrDefault(0L),
+                    portadas = tamano(contexto.cacheDir.resolve(com.auramusic.app.AuraMusicApplication.CARPETA_PORTADAS)),
+                    descargas = tamano(java.io.File(contexto.filesDir, "downloads")),
+                    total = tamano(contexto.dataDir)
+                )
             }
-            onResultado((bytes / (1024 * 1024)).toInt())
+            onResultado(uso)
         }
     }
 

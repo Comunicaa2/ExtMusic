@@ -2,6 +2,7 @@ package com.auramusic.app.ui.screens
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.auramusic.app.data.db.PERFIL_PRINCIPAL
 import com.auramusic.app.data.db.PlaylistDao
 import com.auramusic.app.data.db.PlaylistEntity
 import com.auramusic.app.data.db.PlaylistSongCrossRef
@@ -9,8 +10,10 @@ import com.auramusic.app.data.db.SongEntity
 import com.auramusic.app.data.repository.ImportadorPlaylists
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
@@ -21,7 +24,9 @@ class PlaylistViewModel @Inject constructor(
     private val importador: ImportadorPlaylists
 ) : ViewModel() {
 
-    val playlists = playlistDao.getAll()
+    // null = aún cargando (ver PlayerViewModel.likedSongs).
+    val playlists: StateFlow<List<PlaylistEntity>?> = playlistDao.getAll()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     // ── Importar playlist pública de YouTube por enlace ─────────────────────
     sealed interface EstadoImportacion {
@@ -49,9 +54,12 @@ class PlaylistViewModel @Inject constructor(
 
     fun createPlaylist(name: String) {
         viewModelScope.launch {
-            playlistDao.insert(PlaylistEntity(id = UUID.randomUUID().toString(), name = name))
+            playlistDao.insert(PlaylistEntity(id = UUID.randomUUID().toString(), name = name, perfilId = perfil()))
         }
     }
+
+    // Las playlists nuevas son del perfil de gusto activo.
+    private suspend fun perfil() = playlistDao.perfilActivo() ?: PERFIL_PRINCIPAL
 
     fun deletePlaylist(playlist: PlaylistEntity) {
         viewModelScope.launch { playlistDao.delete(playlist) }
@@ -66,7 +74,7 @@ class PlaylistViewModel @Inject constructor(
     fun crearYAgregar(nombre: String, songId: String) {
         viewModelScope.launch {
             val id = UUID.randomUUID().toString()
-            playlistDao.insert(PlaylistEntity(id = id, name = nombre))
+            playlistDao.insert(PlaylistEntity(id = id, name = nombre, perfilId = perfil()))
             playlistDao.anadirAlFinal(id, songId)
         }
     }

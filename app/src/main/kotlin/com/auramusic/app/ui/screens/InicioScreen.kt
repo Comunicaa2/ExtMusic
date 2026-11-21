@@ -17,8 +17,15 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.MusicNote
+import android.widget.Toast
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,6 +47,7 @@ import com.auramusic.app.R
 import com.auramusic.app.data.api.PlaylistRef
 import com.auramusic.app.data.db.SongEntity
 import com.auramusic.app.ui.components.MenuCancion
+import com.auramusic.app.ui.components.SelectorPerfil
 import com.auramusic.app.ui.components.conReintento
 import com.auramusic.app.ui.navigation.Screen
 
@@ -49,13 +57,19 @@ import com.auramusic.app.ui.navigation.Screen
 // nuevo"; "Me gusta" con "Ver todo"; y carruseles armados con lo que escuchas
 // (InicioViewModel): novedades y mixes de tus artistas, más canciones para ti,
 // artistas parecidos y playlists donde aparecen. Sin chips ni feed genérico.
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InicioScreen(navController: NavController, playerViewModel: PlayerViewModel) {
     val vm: InicioViewModel = hiltViewModel()
     val estado by vm.estado.collectAsStateWithLifecycle()
     val recientes by vm.recientes.collectAsStateWithLifecycle()
     val meGusta by vm.meGusta.collectAsStateWithLifecycle()
-    val recs by playerViewModel.recommendations.collectAsStateWithLifecycle()
+    val recsTodas by playerViewModel.recommendations.collectAsStateWithLifecycle()
+    // "No recomendar": fuera al momento, también de las listas ya guardadas.
+    val ocultas by playerViewModel.clavesNoRecomendadas.collectAsStateWithLifecycle()
+    fun oculta(id: String, titulo: String, artista: String) = ocultas.isNotEmpty() &&
+        (id in ocultas || com.auramusic.app.domain.model.claveCancion(titulo, artista) in ocultas)
+    val recs = remember(recsTodas, ocultas) { recsTodas.filterNot { oculta(it.videoId, it.title, it.artist) } }
     val mias by vm.masEscuchadas.collectAsStateWithLifecycle()
     // Hasta tener lo guardado (base de datos, inicio.json y recomendaciones) solo se
     // ve la barra: antes el primer fotograma decía "no hay música" y luego saltaba.
@@ -70,17 +84,50 @@ fun InicioScreen(navController: NavController, playerViewModel: PlayerViewModel)
     // Las recomendaciones que no entraron en Selección rápida: "Más canciones para ti",
     // tercer carrusel (tras novedades y mixes) para no juntar cuatro de canciones seguidos.
     val masParaTi = stringResource(R.string.home_mas_para_ti)
-    val carruseles = remember(estado.secciones, recs, seleccion) {
+    val carruseles = remember(estado.secciones, recs, seleccion, ocultas) {
         val ids = seleccion.map { it.id }.toHashSet()
         val resto = recs.filter { it.videoId !in ids }
-        if (resto.isEmpty()) estado.secciones
-        else estado.secciones.toMutableList().apply { add(minOf(2, size), SeccionInicio(masParaTi, canciones = resto)) }
+        val secciones = estado.secciones.mapNotNull { s ->
+            if (s.canciones.isEmpty()) s
+            else s.copy(canciones = s.canciones.filterNot { oculta(it.videoId, it.title, it.artist) })
+                .takeIf { it.canciones.isNotEmpty() }
+        }
+        if (resto.isEmpty()) secciones
+        else secciones.toMutableList().apply { add(minOf(2, size), SeccionInicio(masParaTi, canciones = resto)) }
     }
     val acento = MaterialTheme.colorScheme.primary
     val recursos = LocalResources.current
     val cargandoMix by playerViewModel.cargandoListaYtm.collectAsStateWithLifecycle()
 
-    Box(Modifier.fillMaxSize()) {
+    // Deslizar hacia abajo para actualizar (como en YouTube): la lista nunca cambia
+    // sola bajo el dedo, solo al pedirlo. Tope de 15 s para el indicador.
+    val contexto = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var actualizando by remember { mutableStateOf(false) }
+    val estadoPull = rememberPullToRefreshState()
+    val actualizar: () -> Unit = {
+        if (!actualizando) {
+            actualizando = true
+            scope.launch {
+                val recs = playerViewModel.actualizarRecomendaciones()
+                val bien = withTimeoutOrNull(15_000) {
+                    vm.actualizar()
+                    recs.await()
+                } ?: false
+                actualizando = false
+                if (!bien) Toast.makeText(contexto, recursos.getString(R.string.home_no_actualizado), Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    PullToRefreshBox(
+        isRefreshing = actualizando, onRefresh = actualizar, state = estadoPull,
+        modifier = Modifier.fillMaxSize(),
+        indicator = {
+            PullToRefreshDefaults.Indicator(state = estadoPull, isRefreshing = actualizando,
+                modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding())
+        }
+    ) {
         // Degradado suave del acento (Monet) detrás de la barra, como en la maqueta.
         Box(Modifier.fillMaxWidth().height(260.dp)
             .background(Brush.verticalGradient(listOf(acento.copy(alpha = 0.16f), Color.Transparent))))
@@ -90,6 +137,8 @@ fun InicioScreen(navController: NavController, playerViewModel: PlayerViewModel)
                     verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineLarge,
                         fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    // Perfil de gusto activo: tocarlo permite cambiar, crear o gestionar.
+                    SelectorPerfil(hiltViewModel())
                     // launchSingleTop evita apilar varias copias de Ajustes (ver Bug A).
                     IconButton(onClick = { navController.navigate(Screen.Settings.route) { launchSingleTop = true } }) {
                         Icon(Icons.Default.Settings, stringResource(R.string.accion_ajustes),

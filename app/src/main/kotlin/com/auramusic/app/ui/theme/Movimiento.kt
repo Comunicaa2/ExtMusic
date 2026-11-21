@@ -10,6 +10,7 @@ import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.snap
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.layout
@@ -94,6 +95,13 @@ fun <S> AnimatedContentTransitionScope<S>.cambioVertical(): ContentTransform =
     (slideInVertically(Movimiento.estandar(Movimiento.MEDIA)) { it / 3 } + apareceTras())
         .togetherWith(slideOutVertically(Movimiento.estandar(Movimiento.MEDIA)) { -it / 3 } + seApagaYa())
         .using(SizeTransform(clip = false))
+
+/**
+ * Cambio de canción sin animar, para lo que está oculto (el reproductor cerrado o el
+ * mini bajo el reproductor): animarlo pedía unos 30 fotogramas que nadie veía.
+ */
+fun <S> AnimatedContentTransitionScope<S>.sinAnimacion(): ContentTransform =
+    (EnterTransition.None togetherWith ExitTransition.None).using(null)
 
 // Mitades del cruce: la saliente se apaga en 90 ms; la entrante aparece a partir de ahí.
 private const val CRUCE = 90
@@ -185,4 +193,20 @@ fun Modifier.escalaEnLayout(escala: () -> Float): Modifier = layout { medible, l
     val ancho = limites.maxWidth
     val total = (hijo.height / s).roundToInt().coerceIn(limites.minHeight, limites.maxHeight)
     layout(ancho, total) { hijo.place((ancho - hijo.width) / 2, (total - hijo.height) / 2) }
+}
+
+/**
+ * Vista previa del gesto de atrás (Android 14+) para lo que ocupa la pantalla entera
+ * (el reproductor, el visor de letras), como pide Material: con el progreso del gesto
+ * se encoge hasta el 90 %, se aparta del borde por el que entra el dedo y se le
+ * redondean las esquinas. Con progreso 0 no cambia nada.
+ */
+fun androidx.compose.ui.graphics.GraphicsLayerScope.encogerConGesto(progreso: Float, desdeIzquierda: Boolean) {
+    if (progreso <= 0f) return
+    val escala = 1f - 0.1f * progreso
+    scaleX = escala; scaleY = escala
+    val desplazamiento = (size.width / 20f - 8.dp.toPx()).coerceAtLeast(0f) * progreso
+    translationX = if (desdeIzquierda) desplazamiento else -desplazamiento
+    shape = RoundedCornerShape(32.dp * progreso)
+    clip = true
 }

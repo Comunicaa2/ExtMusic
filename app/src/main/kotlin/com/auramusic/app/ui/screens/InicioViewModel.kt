@@ -9,22 +9,30 @@ import com.auramusic.app.data.api.InnertubeClient
 import com.auramusic.app.data.api.ItemColeccion
 import com.auramusic.app.data.api.PaginaArtista
 import com.auramusic.app.data.api.SearchItem
+import com.auramusic.app.data.db.EscuchaArtista
+import com.auramusic.app.data.db.PerfilDao
 import com.auramusic.app.data.db.SongDao
 import com.auramusic.app.data.db.SongEntity
+import com.auramusic.app.data.repository.ArchivosPerfil
 import com.auramusic.app.data.repository.RepositorioPreferencias
 import com.auramusic.app.domain.model.ID_YOUTUBE
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
@@ -63,7 +71,8 @@ data class SeccionInicio(val titulo: String, val canciones: List<SearchItem> = e
 class InicioViewModel @Inject constructor(
     @ApplicationContext private val contexto: Context,
     private val innertube: InnertubeClient,
-    songDao: SongDao,
+    private val songDao: SongDao,
+    private val perfilDao: PerfilDao,
     preferencias: RepositorioPreferencias
 ) : ViewModel() {
 
@@ -85,11 +94,38 @@ class InicioViewModel @Inject constructor(
     val listo: StateFlow<Boolean> = cargado.map { it == TODO_CARGADO }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
-    /** Tus canciones de YouTube más escuchadas (también las descargadas), para Selección rápida. */
-    val masEscuchadas: StateFlow<List<SongEntity>> = combine(songDao.getAll(), preferencias.ajustes) { todas, aj ->
-        deYoutube(todas).filter { !aj.ocultarExplicito || !it.explicit }
-            .sortedByDescending { it.playCount }.take(MAX_MIAS)
-    }.onEach { marcar(1) }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    // Sube cada vez que se desliza para actualizar: 0 = tus 10 más escuchadas; después,
+    // 10 al azar de tus 30 más escuchadas (si no, esa mitad nunca cambiaba).
+    private val variacion = MutableStateFlow(0)
+
+    /**
+     * Tus canciones de YouTube más escuchadas (también las descargadas), para Selección rápida.
+     * La base de datos ya las da filtradas y ordenadas: leer la tabla entera en cada
+     * cambio de canción costaba ~0,7 s de CPU con 3.000 canciones en un Galaxy J7.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val masEscuchadas: StateFlow<List<SongEntity>> = preferencias.ajustes.map { it.ocultarExplicito }.distinctUntilChanged()
+        .flatMapLatest { ocultar -> songDao.masEscuchadas(conExplicito = !ocultar, limite = GRUPO_VARIADO * 2) }
+        .combine(variacion) { lista, v ->
+            val mias = lista.filter { esDeYoutube(it.id, it.fuente) }
+            if (v == 0) mias.take(MAX_MIAS) else mias.take(GRUPO_VARIADO).shuffled(kotlin.random.Random(v)).take(MAX_MIAS)
+        }.soloSiCambiaLoQueSeVe().onEach { marcar(1) }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /**
+     * Cada canción que suena reescribe su fila (contador, última vez, duración) y Room
+     * vuelve a emitir la tabla entera, varias veces por cambio de canción. Las listas
+     * se calculan fuera del hilo principal y solo llegan al Inicio si cambia algo que
+     * se ve: en un Galaxy J7 el Inicio se rehacía entero bajo el reproductor en cada
+     * cambio de canción, con sus portadas.
+     */
+    private fun Flow<List<SongEntity>>.soloSiCambiaLoQueSeVe() =
+        distinctUntilChanged { a, b ->
+            a.size == b.size && a.indices.all { i ->
+                val x = a[i]; val y = b[i]
+                x.id == y.id && x.title == y.title && x.artist == y.artist && x.thumbnailUrl == y.thumbnailUrl &&
+                    x.durationMs == y.durationMs && x.isLiked == y.isLiked && x.explicit == y.explicit
+            }
+        }.flowOn(Dispatchers.Default)
 
     // "Escuchar de nuevo" y "Me gusta" se guardan aquí (el ViewModel sobrevive mientras
     // el reproductor tapa el Inicio): al volver ya tienen sus canciones en el primer
@@ -97,12 +133,13 @@ class InicioViewModel @Inject constructor(
     // otras secciones arriba y luego saltaba.
     val recientes: StateFlow<List<SongEntity>> = combine(songDao.getRecentlyPlayedStreaming(), preferencias.ajustes) { l, aj ->
         if (aj.ocultarExplicito) l.filter { !it.explicit } else l
-    }.onEach { marcar(2) }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    }.soloSiCambiaLoQueSeVe().onEach { marcar(2) }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val meGusta: StateFlow<List<SongEntity>> = combine(songDao.getLiked(), preferencias.ajustes) { l, aj ->
         if (aj.ocultarExplicito) l.filter { !it.explicit } else l
-    }.onEach { marcar(4) }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    }.soloSiCambiaLoQueSeVe().onEach { marcar(4) }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    private val archivo get() = File(contexto.filesDir, "inicio.json")
+    // El Inicio guardado es de cada perfil de gusto (ver ArchivosPerfil).
+    @Volatile private var perfilActual: String? = null
     private val serializador = ListSerializer(SeccionInicio.serializer())
     private val json = Json { ignoreUnknownKeys = true }
     private var artistas: List<ArtistaTuyo> = emptyList()
@@ -110,29 +147,57 @@ class InicioViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            guardado()?.let { g -> _estado.update { it.copy(secciones = g) } }
-            marcar(8)
-            // Cada canción que suena cambia el historial, pero solo se vuelve a pedir
-            // a YT Music cuando cambian tus artistas.
-            songDao.getAll().map { tusArtistas(it) }.distinctUntilChanged().collect { a ->
-                artistas = a
-                armar()
+            // Al cambiar de perfil se empieza de nuevo con lo guardado de ese perfil.
+            perfilDao.activo().map { it?.id }.distinctUntilChanged().collectLatest { perfil ->
+                trabajo?.cancel()
+                perfilActual = perfil
+                variacion.value = 0
+                val g = guardado(perfil)
+                _estado.update { Estado(secciones = g.orEmpty()) }
+                marcar(8)
+                // Cada canción que suena cambia el historial, pero el Inicio solo se rehace
+                // cuando cambian tus artistas (o su orden), y solo pide a YT Music las
+                // páginas que no tiene (ver paginasVistas).
+                songDao.escuchasPorArtista().map { tusArtistas(it) }.distinctUntilChanged().flowOn(Dispatchers.Default).collect { a ->
+                    artistas = a
+                    armar()
+                }
             }
         }
     }
 
-    fun reintentar() = armar()
+    fun reintentar() { armar() }
 
-    private fun armar() {
+    /** Deslizar para actualizar: otra mezcla de tus canciones y los carruseles de nuevo. */
+    suspend fun actualizar() {
+        variacion.value++
+        armar(forzar = true).join()
+    }
+
+    /**
+     * Páginas de artista ya pedidas (también los artistas que no se encuentran), por
+     * artista. Casi cada canción que suena reordena tus artistas (los 2 recientes) y
+     * antes se volvían a pedir las 6 páginas a YT Music en cada cambio de canción: en
+     * un Galaxy J7, guardarlas bajó la CPU de la app en 8 cambios de ~38–46 s a
+     * ~24–26 s. Ahora solo se pide la de un artista nuevo o la que ha caducado.
+     */
+    private class PaginaVista(val pagina: PaginaArtista?, val hora: Long)
+    private val paginasVistas = java.util.concurrent.ConcurrentHashMap<ArtistaTuyo, PaginaVista>()
+    private fun vigente(v: PaginaVista?) = v != null && System.currentTimeMillis() - v.hora < VIGENCIA_MS
+
+    private fun armar(forzar: Boolean = false): Job {
         trabajo?.cancel()
         val lista = artistas
-        trabajo = viewModelScope.launch {
+        val perfil = perfilActual
+        return viewModelScope.launch {
             if (lista.isEmpty()) {
                 _estado.update { Estado() }
                 return@launch
             }
-            _estado.update { it.copy(cargando = true, aviso = null) }
-            val paginas = coroutineScope { lista.map { a -> async { pagina(a) } }.awaitAll() }
+            paginasVistas.entries.removeAll { !vigente(it.value) }   // solo la última hora
+            // Sin nada que pedir, no se muestra "cargando" (si no, parpadeaba en cada canción).
+            if (forzar || !lista.all { vigente(paginasVistas[it]) }) _estado.update { it.copy(cargando = true, aviso = null) }
+            val paginas = coroutineScope { lista.map { a -> async { pagina(a, forzar) } }.awaitAll() }
             val listas = paginas.mapNotNull { it?.getOrNull() }
             if (listas.isEmpty()) {
                 val sinRed = paginas.any { it?.exceptionOrNull() is java.io.IOException }
@@ -145,14 +210,24 @@ class InicioViewModel @Inject constructor(
                 return@launch
             }
             val secciones = construir(listas)
+            val cambia = secciones != _estado.value.secciones
             _estado.update { Estado(secciones) }
-            guardar(secciones)
-        }
+            if (cambia) guardar(perfil, secciones)
+        }.also { trabajo = it }
     }
 
-    // La página de YT Music de un artista tuyo. Sin su id, se busca por el nombre
-    // exacto (para no traer a otro artista que se llame parecido).
-    private suspend fun pagina(a: ArtistaTuyo): Result<PaginaArtista>? {
+    // La página de YT Music de un artista tuyo: la ya vista si sigue vigente (salvo
+    // [forzar]) o pedida de nuevo. Los fallos de red no se guardan: se reintentan.
+    private suspend fun pagina(a: ArtistaTuyo, forzar: Boolean): Result<PaginaArtista>? {
+        paginasVistas[a]?.takeIf { !forzar && vigente(it) }?.let { v -> return v.pagina?.let { Result.success(it) } }
+        val r = pedirPagina(a)
+        if (r == null || r.isSuccess) paginasVistas[a] = PaginaVista(r?.getOrNull(), System.currentTimeMillis())
+        return r
+    }
+
+    // Sin su id, se busca por el nombre exacto (para no traer a otro artista que se
+    // llame parecido); null si no se encuentra.
+    private suspend fun pedirPagina(a: ArtistaTuyo): Result<PaginaArtista>? {
         val id = a.id ?: innertube.buscarArtistas(a.nombre).getOrElse { return Result.failure(it) }
             .firstOrNull { it.nombre.equals(a.nombre, ignoreCase = true) }?.browseId ?: return null
         return innertube.artista(id)
@@ -204,22 +279,26 @@ class InicioViewModel @Inject constructor(
         return salida
     }
 
-    private suspend fun guardado(): List<SeccionInicio>? = withContext(Dispatchers.IO) {
-        runCatching { json.decodeFromString(serializador, archivo.readText()) }.getOrNull()
+    private fun archivo(perfil: String?) = ArchivosPerfil.archivo(contexto, perfil, "inicio.json")
+
+    private suspend fun guardado(perfil: String?): List<SeccionInicio>? = withContext(Dispatchers.IO) {
+        runCatching { json.decodeFromString(serializador, archivo(perfil).readText()) }.getOrNull()
     }
 
-    private suspend fun guardar(s: List<SeccionInicio>) = withContext(Dispatchers.IO) {
-        runCatching { archivo.writeText(json.encodeToString(serializador, s)) }
+    private suspend fun guardar(perfil: String?, s: List<SeccionInicio>) = withContext(Dispatchers.IO) {
+        runCatching { archivo(perfil).writeText(json.encodeToString(serializador, s)) }
             .onFailure { Log.w(TAG, "No se pudo guardar el Inicio: ${it.message}") }
     }
 
     companion object {
         private const val TAG = "Inicio"
         private const val MAX_MIAS = 10
+        private const val GRUPO_VARIADO = 30
         private const val TODO_CARGADO = 1 or 2 or 4 or 8   // listas y inicio.json
         private const val MAX_ARTISTAS = 6
         private const val POR_ARTISTA = 4
         private const val MAX_CARRUSEL = 20
+        private const val VIGENCIA_MS = 60 * 60 * 1000L   // páginas de artista: 1 h
         private const val ALBUM = "MUSIC_PAGE_TYPE_ALBUM"
         private const val PLAYLIST = "MUSIC_PAGE_TYPE_PLAYLIST"
         private val ANIO = Regex("\\b(19|20)\\d{2}\\b")
@@ -230,15 +309,15 @@ class InicioViewModel @Inject constructor(
 /** Un artista que escuchas: su nombre y, si se sabe, su browseId de YT Music. */
 data class ArtistaTuyo(val nombre: String, val id: String?)
 
-private fun deYoutube(todas: List<SongEntity>) =
-    todas.filter { it.playCount > 0 && (ID_YOUTUBE.matches(it.fuente) || ID_YOUTUBE.matches(it.id)) }
+private fun esDeYoutube(id: String, fuente: String) = ID_YOUTUBE.matches(fuente) || ID_YOUTUBE.matches(id)
 
 /**
  * Tus artistas: los 4 más escuchados y los 2 de lo último que sonó (así el Inicio
- * sigue lo que escuchas ahora), sin repetir.
+ * sigue lo que escuchas ahora), sin repetir. [historial]: las escuchadas, de la más
+ * reciente a la más antigua.
  */
-private fun tusArtistas(historial: List<SongEntity>): List<ArtistaTuyo> {
-    val grupos = deYoutube(historial).filter { it.artist.isNotBlank() }
+private fun tusArtistas(historial: List<EscuchaArtista>): List<ArtistaTuyo> {
+    val grupos = historial.filter { it.artist.isNotBlank() && esDeYoutube(it.id, it.fuente) }
         .groupBy { extractMainArtist(it.artist).lowercase() }
     val porEscuchas = grupos.entries.sortedByDescending { e -> e.value.sumOf { it.playCount } }.map { it.key }
     val porRecientes = grupos.entries.sortedByDescending { e -> e.value.maxOf { it.lastPlayed } }.map { it.key }

@@ -132,11 +132,18 @@ class DescargaWorker @AssistedInject constructor(
             .build()
         notificar(nm, notifId, fin)
 
+        // La duración del archivo descargado es la de verdad: la radio, la reproducción
+        // automática y Me gusta suelen encolar con 0, y sin ella no se puede elegir la
+        // versión de la letra (se guardaba sin sincronizar para siempre).
+        val duracionReal = duracionDe(archivoAudio).takeIf { it > 0 } ?: durMs
+        android.util.Log.d("DescargaWorker", "Duración de $videoId: archivo $duracionReal ms, cola $durMs ms")
+
         // 3.5) D1: letra de LRCLIB junto al audio (mismo nombre, .lrc) para offline.
         if (ajustes.descargarLetras) {
             runCatching {
-                val res = innertube.getLyrics(title, artist, (durMs / 1000).toInt())
-                if (res != null) File(dir, "$videoId.lrc").writeText(lyricsALrc(res))
+                val seg = ((duracionReal + 500) / 1000).toInt()
+                val res = innertube.getLyrics(title, artist, seg)
+                if (res != null) guardarLetra(archivoLetra(applicationContext, videoId), res, seg)
             }
         }
 
@@ -147,10 +154,11 @@ class DescargaWorker @AssistedInject constructor(
         val previa = songDao.getById(videoId)
         val cancion = previa?.copy(
             isDownloaded = true, localPath = rutaGuardada, downloadQuality = audioInfo.bitrate,
-            origen = OrigenCancion.LOCAL.name, fuente = rutaGuardada
+            origen = OrigenCancion.LOCAL.name, fuente = rutaGuardada,
+            durationMs = previa.durationMs.takeIf { it > 0 } ?: duracionReal
         ) ?: SongEntity(
             id = videoId, title = title, artist = artist, artistId = "", album = "",
-            thumbnailUrl = thumb, durationMs = durMs,
+            thumbnailUrl = thumb, durationMs = duracionReal,
             isDownloaded = true, localPath = rutaGuardada, downloadQuality = audioInfo.bitrate,
             origen = OrigenCancion.LOCAL.name, fuente = rutaGuardada
         )
@@ -158,18 +166,13 @@ class DescargaWorker @AssistedInject constructor(
         return Result.success()
     }
 
-    // Serializa la letra a formato .lrc. Si es sincronizada, antepone [mm:ss.xx].
-    private fun lyricsALrc(r: LyricsResult): String = buildString {
-        for (l in r.lines) {
-            if (r.isSynced) {
-                val min = l.timeMs / 60000
-                val sec = (l.timeMs % 60000) / 1000
-                val cent = (l.timeMs % 1000) / 10
-                append("[%02d:%02d.%02d]".format(min, sec, cent))
-            }
-            append(l.text).append("\n")
-        }
-    }
+    private fun duracionDe(archivo: File): Long = runCatching {
+        val r = android.media.MediaMetadataRetriever()
+        try {
+            r.setDataSource(archivo.absolutePath)
+            r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+        } finally { r.release() }
+    }.getOrDefault(0L)
 
     private fun crearCanal() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -206,6 +209,34 @@ class DescargaWorker @AssistedInject constructor(
         fun archivoLetra(ctx: Context, videoId: String): File =
             // El id puede venir de un respaldo: sin "/" ni "..", nunca sale de la carpeta.
             File(carpetaDescargas(ctx), videoId.replace(Regex("[^A-Za-z0-9_-]"), "_") + ".lrc")
+
+        /**
+         * Guarda la letra en .lrc. La etiqueta estándar [length:] anota con qué
+         * duración se eligió: un .lrc sin ella (de la 1.3.0 o antes, elegido sin mirar
+         * la duración) o sin sincronizar se vuelve a buscar cuando hay red.
+         */
+        fun guardarLetra(archivo: File, r: LyricsResult, duracionSeg: Int) {
+            val texto = buildString {
+                if (duracionSeg > 0) append("[length:%02d:%02d]\n".format(duracionSeg / 60, duracionSeg % 60))
+                for (l in r.lines) {
+                    if (r.isSynced) {
+                        val min = l.timeMs / 60000
+                        val sec = (l.timeMs % 60000) / 1000
+                        val cent = (l.timeMs % 1000) / 10
+                        append("[%02d:%02d.%02d]".format(min, sec, cent))
+                    }
+                    append(l.text).append("\n")
+                }
+            }
+            // Primero a un temporal: si se corta a mitad, el .lrc anterior sigue entero.
+            val temporal = File(archivo.parentFile, archivo.name + ".tmp")
+            temporal.writeText(texto)
+            if (!temporal.renameTo(archivo)) { archivo.writeText(texto); temporal.delete() }
+        }
+
+        /** Si el .lrc guardado ya es definitivo: sincronizado y elegido por duración. */
+        fun letraDefinitiva(contenido: String, r: LyricsResult): Boolean =
+            r.isSynced && Regex("""^\[length:\s*\d""", RegexOption.MULTILINE).containsMatchIn(contenido)
 
         /**
          * El archivo de una ruta guardada ("file://…") solo si está dentro de la
