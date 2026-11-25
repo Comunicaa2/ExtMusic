@@ -6,6 +6,8 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import com.auramusic.app.actualizador.HojaActualizacion
+import com.auramusic.app.ui.components.permisoNotificacionesResuelto
 import androidx.activity.viewModels
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -148,6 +150,8 @@ class MainActivity : ComponentActivity() {
                         videoDeepLink != null,
                     ventanaExpandida = ventanaExpandida
                 )
+                // Aviso de versión nueva (solo copias de GitHub); es una hoja aparte, no toca el reproductor.
+                HojaActualizacion()
               }
             }
         }
@@ -244,7 +248,10 @@ fun AuraMusicApp(
             }
         )
     }
-    if (mostrarBateria) {
+    // Primero el permiso de notificaciones (primera vez, Android 13+) y luego este:
+    // así no salen los dos a la vez.
+    val notificacionesResuelto = permisoNotificacionesResuelto()
+    if (mostrarBateria && notificacionesResuelto) {
         AlertDialog(
             onDismissRequest = { mostrarBateria = false },
             icon = { Icon(Icons.Default.BatteryAlert, null) },

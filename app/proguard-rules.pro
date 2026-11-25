@@ -24,6 +24,7 @@
 # WorkManager instancia los workers por nombre de clase (Class.forName), así que el
 # worker no puede renombrarse o no se encontraría al recrear el trabajo.
 -keep class com.auramusic.app.work.DescargaWorker { *; }
+-keep class com.auramusic.app.actualizador.DescargaActualizacionWorker { *; }
 # El resto (ui, service, repository, api, MainActivity, Application) SÍ se ofusca.
 # Hilt y Room aportan sus propios keeps para su código generado.
 

@@ -26,6 +26,7 @@ import com.auramusic.app.data.repository.RespaldoRepository
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.auramusic.app.BuildConfig
+import com.auramusic.app.actualizador.FilasActualizacion
 import com.auramusic.app.R
 import com.auramusic.app.domain.model.AudioQuality
 import com.auramusic.app.domain.model.TemaApp
@@ -477,6 +478,8 @@ fun SettingsScreen(navController: NavController) {
                     leadingContent = { Icon(Icons.Default.MusicNote, null, tint = MaterialTheme.colorScheme.primary) }
                 )
             }
+            // "Buscar actualizaciones" y "Buscar al abrir la app" (solo copias de GitHub).
+            item { FilasActualizacion() }
             item {
                 ListItem(
                     headlineContent = { Text(stringResource(R.string.acerca_creditos)) },

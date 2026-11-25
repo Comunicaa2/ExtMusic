@@ -3,9 +3,7 @@ package com.auramusic.app.ui.screens
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
-import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
@@ -15,6 +13,7 @@ import com.auramusic.app.data.db.SongDao
 import com.auramusic.app.data.repository.RepositorioPreferencias
 import com.auramusic.app.domain.model.OrigenCancion
 import com.auramusic.app.work.DescargaWorker
+import com.auramusic.app.work.restriccionesDescarga
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
@@ -58,9 +57,8 @@ class DownloadViewModel @Inject constructor(
             // Ajuste "Descargar solo con WiFi": WorkManager deja la descarga en
             // espera hasta que haya una red sin límite de datos.
             val soloWifi = repositorioPreferencias.ajustes.first().descargarSoloWifi
-            val restricciones = Constraints.Builder()
-                .setRequiredNetworkType(if (soloWifi) NetworkType.UNMETERED else NetworkType.CONNECTED)
-                .build()
+            // Sin exigir red "validada" (ver restriccionesDescarga).
+            val restricciones = restriccionesDescarga(soloWifi)
             val solicitud = OneTimeWorkRequestBuilder<DescargaWorker>()
                 .setInputData(datos).setConstraints(restricciones).build()
             workManager.enqueueUniqueWork(

@@ -1,0 +1,4 @@
+• Nuevo: la app te avisa cuando hay una versión nueva y la instala sola
+• Arreglo: las descargas ya no se quedan atascadas en algunos Wi-Fi
+• Arreglo: una descarga cortada ya no deja la canción dañada
+• Pide permiso para mostrar notificaciones la primera vez

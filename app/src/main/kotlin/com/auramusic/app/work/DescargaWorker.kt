@@ -82,18 +82,34 @@ class DescargaWorker @AssistedInject constructor(
         // 3) Descarga en trozos de 2 MB, reportando progreso (WorkManager + notificación).
         // Una sola petición abierta va limitada por YouTube a ~la velocidad de
         // reproducción (~2 min por canción); en trozos acotados no hay límite.
+        // Se escribe en un .part y solo se renombra al final, comprobado: si el
+        // proceso muere a mitad no queda un archivo cortado con el nombre bueno,
+        // y si falla no se pierde una descarga anterior de la misma canción.
+        val archivoParcial = File(dir, "${archivoAudio.name}.part")
         try {
             val okhttp = OkHttpClient()
             var total = -1L   // tamaño del archivo, sacado del primer Content-Range
             var hechos = 0L
             var ultimoPct = -5
-            archivoAudio.outputStream().use { out ->
+            var completoDeUnaVez = false   // el servidor ignoró el Range y mandó todo
+            archivoParcial.outputStream().use { out ->
                 while (total < 0 || hechos < total) {
                     val hasta = hechos + TrozosDataSource.TAMANO_TROZO - 1
                     val pedido = Request.Builder().url(audioInfo.url)
                         .header("Range", "bytes=$hechos-$hasta").build()
                     val recibidos = okhttp.newCall(pedido).execute().use { resp ->
                         if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
+                        // Auditoría 1.4.1, AUD-001: cada trozo debe empezar donde se
+                        // pidió. Un 200 (archivo entero) solo vale en el primero; más
+                        // adelante pegaría el archivo completo detrás de lo ya escrito.
+                        if (resp.code == 200) {
+                            if (hechos > 0) throw IOException("El servidor ignoró el Range a mitad de descarga")
+                            completoDeUnaVez = true
+                        } else {
+                            val inicio = resp.header("Content-Range")
+                                ?.substringAfter("bytes ", "")?.substringBefore('-')?.toLongOrNull()
+                            if (inicio != hechos) throw IOException("Trozo fuera de sitio: pedido $hechos, llegó $inicio")
+                        }
                         if (total < 0) total = resp.header("Content-Range")
                             ?.substringAfterLast('/')?.toLongOrNull()
                             ?: (resp.body?.contentLength() ?: -1L).takeIf { resp.code == 200 } ?: -1L
@@ -111,14 +127,22 @@ class DescargaWorker @AssistedInject constructor(
                             notificar(nm, notifId, builder.build())
                         }
                     }
+                    // Con total conocido, un trozo vacío antes del final es una
+                    // descarga cortada, no el final (AUD-001).
+                    if (recibidos == 0L && total > 0 && hechos < total)
+                        throw IOException("Descarga cortada en $hechos de $total bytes")
                     // Sin total conocido: un trozo incompleto (o vacío) es el final.
                     if (recibidos == 0L || (total < 0 && recibidos < TrozosDataSource.TAMANO_TROZO)) break
                     // Si el servidor ignoró el Range (200 con todo), ya está completo.
-                    if (total > 0 && hechos >= total) break
+                    if (completoDeUnaVez || (total > 0 && hechos >= total)) break
                 }
             }
+            // Con total conocido tiene que coincidir exacto: ni menos (cortada)
+            // ni más (bytes pegados de otra respuesta).
+            if (total > 0 && hechos != total) throw IOException("Tamaño $hechos, se esperaba $total")
+            if (!archivoParcial.renameTo(archivoAudio)) throw IOException("No se pudo guardar $archivoAudio")
         } catch (e: Exception) {
-            archivoAudio.delete()   // no dejar un archivo a medias que parezca válido
+            archivoParcial.delete()   // no dejar un archivo a medias que parezca válido
             nm.cancel(notifId)
             return Result.failure()
         }

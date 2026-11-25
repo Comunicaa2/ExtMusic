@@ -43,22 +43,24 @@ class NewPipeDownloader private constructor() : Downloader() {
             else   -> reqBuilder.get().build()
         }
 
-        val resp = okhttp.newCall(okRequest).execute()
-        if (resp.code == 429) throw ReCaptchaException("Rate limited", request.url())
+        // `use` cierra la respuesta en todas las salidas: también en el 429 y si
+        // leer el cuerpo falla a medias (auditoría 1.4.1, AUD-002).
+        okhttp.newCall(okRequest).execute().use { resp ->
+            if (resp.code == 429) throw ReCaptchaException("Rate limited", request.url())
 
-        // Construir headers de respuesta
-        val respHeaders = LinkedHashMap<String, MutableList<String>>()
-        for (i in 0 until resp.headers.size) {
-            val name  = resp.headers.name(i)
-            val value = resp.headers.value(i)
-            respHeaders.getOrPut(name) { mutableListOf() }.add(value)
+            // Construir headers de respuesta
+            val respHeaders = LinkedHashMap<String, MutableList<String>>()
+            for (i in 0 until resp.headers.size) {
+                val name  = resp.headers.name(i)
+                val value = resp.headers.value(i)
+                respHeaders.getOrPut(name) { mutableListOf() }.add(value)
+            }
+
+            val body = resp.body?.string()
+            val finalUrl = resp.request.url.toString()
+
+            return Response(resp.code, resp.message, respHeaders, body, finalUrl)
         }
-
-        val body = resp.body?.string()
-        val finalUrl = resp.request.url.toString()
-        resp.close()
-
-        return Response(resp.code, resp.message, respHeaders, body, finalUrl)
     }
 
     companion object {

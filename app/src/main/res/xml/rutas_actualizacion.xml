@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lo único que el FileProvider del actualizador puede compartir: la APK verificada. -->
+<paths>
+    <files-path name="actualizacion" path="actualizacion/" />
+</paths>

@@ -1,0 +1,4 @@
+• New: the app tells you when there's a new version and installs it for you
+• Fix: downloads no longer get stuck on some Wi-Fi networks
+• Fix: a cut-off download no longer leaves a broken song
+• Asks permission to show notifications the first time

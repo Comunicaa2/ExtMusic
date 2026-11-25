@@ -14,6 +14,9 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!-- Evita que el sistema mate el proceso al bloquear pantalla -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+    <!-- Actualizador: abrir el instalador de Android con la APK de GitHub ya verificada.
+         Solo se usa en copias firmadas con la clave de GitHub (ver actualizador/FirmaPropia). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- (L4) Nota: RECEIVE_BOOT_COMPLETED NO se declara aquí; lo aporta WorkManager
          (androidx.work) para reanudar descargas tras reiniciar. Es legítimo y normal
          (auto-concedido, sin prompt). Se quitó la declaración redundante de la app. -->
@@ -100,6 +103,17 @@
                 android:name="androidx.work.WorkManagerInitializer"
                 android:value="androidx.startup"
                 tools:node="remove" />
+        </provider>
+
+        <!-- Actualizador: entrega al instalador solo la carpeta filesDir/actualizacion. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.actualizacion"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/rutas_actualizacion" />
         </provider>
 
     </application>

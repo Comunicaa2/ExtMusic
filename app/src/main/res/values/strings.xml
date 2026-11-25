@@ -392,4 +392,52 @@
         <item quantity="other">%d canciones</item>
     </plurals>
 
+    <!-- Actualizador (Ajustes ▸ Acerca de y hoja de versión nueva) -->
+    <string name="act_buscar">Buscar actualizaciones</string>
+    <string name="act_al_dia">Tienes la última versión · %1$s</string>
+    <string name="act_al_dia_nunca">Toca para buscar la última versión</string>
+    <string name="act_hoy">hoy, %1$s</string>
+    <string name="act_buscando">Buscando…</string>
+    <string name="act_disponible_fila">ExtMusic %1$s disponible · toca para verla</string>
+    <string name="act_descargando_fila">Descargando %1$s · %2$d %%</string>
+    <string name="act_lista_fila">%1$s lista para instalar · toca para instalar</string>
+    <string name="act_err_red">No se pudo comprobar: sin conexión</string>
+    <string name="act_err_red_descarga">No se pudo descargar: sin conexión. Toca para reintentar.</string>
+    <string name="act_err_limite">GitHub pide esperar. Se vuelve a intentar mañana.</string>
+    <string name="act_err_catalogo">La versión publicada no trae lo necesario. Se vuelve a intentar mañana.</string>
+    <string name="act_err_danada">La descarga no coincidía con la publicada y se borró. Toca para reintentar.</string>
+    <string name="act_err_apk">La APK no era válida y se borró. Toca para volver a descargarla.</string>
+    <string name="act_auto">Buscar al abrir la app</string>
+    <string name="act_auto_desc">Una vez al día como mucho, sin avisar si no hay nada</string>
+    <string name="act_nueva_titulo">Hay una versión nueva</string>
+    <string name="act_version_tamano">ExtMusic %1$s · %2$s</string>
+    <string name="act_novedades">Novedades</string>
+    <string name="act_sigue_sonando">La música sigue sonando mientras se descarga.</string>
+    <string name="act_mas_tarde">Más tarde</string>
+    <string name="act_descargar">Descargar</string>
+    <string name="act_descargando_titulo">Descargando…</string>
+    <string name="act_version">ExtMusic %1$s</string>
+    <string name="act_progreso">%1$s de %2$s</string>
+    <string name="act_porcentaje">%1$d %%</string>
+    <string name="act_puedes_cerrar">Puedes cerrar esto: la descarga sigue y te avisamos al terminar.</string>
+    <string name="act_cancelar_descarga">Cancelar descarga</string>
+    <string name="act_ocultar">Ocultar</string>
+    <string name="act_lista_titulo">Lista para instalar</string>
+    <string name="act_comprobada">Comprobada: es la publicada en GitHub y lleva la misma firma que tu ExtMusic. Tu música, listas y ajustes se quedan como están.</string>
+    <string name="act_confirmar">Android te pedirá confirmar. La música se parará un momento mientras se instala.</string>
+    <string name="act_instalar">Instalar</string>
+    <string name="act_permiso_titulo">Falta un permiso</string>
+    <string name="act_permiso_sub">Solo hace falta la primera vez</string>
+    <string name="act_permiso_texto">Android solo deja instalar actualizaciones a las apps que tú permites. ExtMusic lo usa únicamente para instalar sus propias versiones.</string>
+    <string name="act_paso1">Toca %1$s.</string>
+    <string name="act_paso2">Activa %1$s.</string>
+    <string name="act_paso3">Vuelve atrás: la instalación sigue sola.</string>
+    <string name="act_permitir_fuente">Permitir o Confiar en esta fuente</string>
+    <string name="act_cancelar">Cancelar</string>
+    <string name="act_cerrar">Cerrar</string>
+    <string name="act_abrir_ajustes">Abrir ajustes</string>
+    <string name="act_canal">Actualizaciones</string>
+    <string name="act_notif_lista">ExtMusic %1$s lista para instalar</string>
+    <string name="act_notif_lista_texto">Toca para instalarla.</string>
+
 </resources>
