@@ -31,8 +31,8 @@ android {
         applicationId = "com.auramusic.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 10
-        versionName = "1.4.2"
+        versionCode = 11
+        versionName = "1.4.3"
 
         // (M2) Se eliminaron YT_CLIENT_ID / YT_CLIENT_SECRET: eran del login de TV
         // antiguo, ningún .kt los usa y quedaban expuestos en el APK. El login nativo
@@ -156,8 +156,6 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.12.0")
     implementation("androidx.hilt:hilt-work:1.4.0")
     ksp("androidx.hilt:hilt-compiler:1.4.0")
-    // Escritura en la carpeta de descargas elegida por SAF (Bug 4).
-    implementation("androidx.documentfile:documentfile:1.0.1")
     // Arrastrar para reordenar la cola (Apache-2.0, solo Compose).
     implementation("sh.calvin.reorderable:reorderable:3.1.0")
 

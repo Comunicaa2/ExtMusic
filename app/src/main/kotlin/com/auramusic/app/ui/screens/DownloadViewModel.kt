@@ -32,8 +32,12 @@ enum class DownloadStatus { PENDING, DOWNLOADING, DONE, ERROR }
 class DownloadViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val songDao: SongDao,
-    private val repositorioPreferencias: RepositorioPreferencias
+    private val repositorioPreferencias: RepositorioPreferencias,
+    private val registroFallos: com.auramusic.app.work.RegistroFallosDescarga
 ) : ViewModel() {
+
+    /** Canciones cuya última descarga falló: su ⋮ ofrece "Reintentar descarga". */
+    val fallos = registroFallos.fallos
 
     private val _downloads = MutableStateFlow<Map<String, DownloadProgress>>(emptyMap())
     val downloads: StateFlow<Map<String, DownloadProgress>> = _downloads
@@ -53,6 +57,8 @@ class DownloadViewModel @Inject constructor(
             DescargaWorker.KEY_THUMB to item.thumbnailUrl,
             DescargaWorker.KEY_DURATION to parseDuracion(item.duration)
         )
+        // Se vuelve a pedir: deja de contar como fallida (si vuelve a fallar, se anota otra vez).
+        registroFallos.quitar(item.videoId)
         viewModelScope.launch {
             // Ajuste "Descargar solo con WiFi": WorkManager deja la descarga en
             // espera hasta que haya una red sin límite de datos.

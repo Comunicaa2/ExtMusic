@@ -177,6 +177,7 @@ private fun textoFila(ctx: Context, e: EstadoActualizacion): String = when (e) {
     is EstadoActualizacion.Lista -> ctx.getString(R.string.act_lista_fila, e.version.version)
     is EstadoActualizacion.Fallo -> ctx.getString(when (e.tipo) {
         ErrorActualizacion.RED -> if (e.enDescarga) R.string.act_err_red_descarga else R.string.act_err_red
+        ErrorActualizacion.ESPACIO -> R.string.act_err_espacio
         ErrorActualizacion.LIMITE -> R.string.act_err_limite
         ErrorActualizacion.CATALOGO -> R.string.act_err_catalogo
         ErrorActualizacion.DANADA -> R.string.act_err_danada

@@ -64,6 +64,8 @@ class RecommendationRepository @Inject constructor(
         // Solo lo escuchado en este perfil (las de otros perfiles están a cero). Las
         // marcadas con "No recomendar" no sirven de semilla.
         val todas = songDao.getAll().first()
+        // Si el perfil cambió entre las dos lecturas, este historial ya es del otro.
+        if (perfilDao.activoId() != perfil) return emptyList()
         val history = todas.filter { it.playCount > 0 || it.lastPlayed > 0 }.take(100)
         val deYoutube = history.filter { videoIdDe(it) != null && !it.noRecomendar }
         if (deYoutube.isEmpty()) return getDefaultRecommendations()

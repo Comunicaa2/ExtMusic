@@ -100,6 +100,8 @@ class PlayerViewModel @Inject constructor(
     val recommendations = MutableStateFlow<List<SearchItem>>(emptyList())
     /** Ya se leyeron las recomendaciones guardadas: el Inicio espera a esto para no saltar. */
     val recomendacionesListas = MutableStateFlow(false)
+    // Declarada antes del init, que ya la usa.
+    private var cargaRecomendaciones: Job? = null
 
     // Q: si "Ocultar contenido explícito" está activo, las listas ocultan (no
     // borran) las canciones explicit. Reactivo: combina la lista con el ajuste.
@@ -1008,18 +1010,24 @@ class PlayerViewModel @Inject constructor(
      * Devuelve false si no llegó nada (sin red): entonces se queda la lista actual.
      */
     fun actualizarRecomendaciones(): Deferred<Boolean> = viewModelScope.async {
+        val perfil = perfilDao.activoId()
         val actuales = recommendations.value.map { it.videoId }.toSet()
         val recs = runCatching { recommendationRepository.getRecommendations(variar = true, evitar = actuales) }
             .onFailure { if (it is CancellationException) throw it; Log.w(TAG, "Actualizar: ${it.message.sinUrls()}") }
             .getOrDefault(emptyList())
-        if (recs.isEmpty()) return@async false
         val ocultar = repositorioPreferencias.ajustes.first().ocultarExplicito
+        // Si mientras tanto se cambió de perfil, la lista es del anterior (ya quedó
+        // guardada en el suyo): no se muestra, y tampoco es un fallo que avisar.
+        if (perfilDao.activoId() != perfil) return@async true
+        if (recs.isEmpty()) return@async false
         recommendations.value = if (ocultar) recs.filter { !it.explicit } else recs
         true
     }
 
     private fun loadRecommendations() {
-        viewModelScope.launch {
+        // La carga del perfil anterior, si sigue en marcha, no debe pisar la de este.
+        cargaRecomendaciones?.cancel()
+        cargaRecomendaciones = viewModelScope.launch {
             // Se muestran las guardadas (al instante) y las nuevas se piden y se guardan
             // para la próxima vez que se abra la app: así Selección rápida no cambia bajo
             // el dedo a los pocos segundos de abrir. Solo si no había guardadas (primera

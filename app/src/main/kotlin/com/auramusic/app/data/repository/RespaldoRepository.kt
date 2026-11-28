@@ -20,14 +20,19 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.decodeFromStream
+import kotlinx.serialization.json.encodeToStream
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedInputStream
+import java.io.File
 import java.io.FilterInputStream
 import java.io.IOException
 import java.io.InputStream
+import java.io.OutputStream
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 import javax.inject.Inject
@@ -68,6 +73,9 @@ class RespaldoRepository @Inject constructor(
 
     /** El respaldo pasa de los límites (archivo, texto o número de elementos). */
     class RespaldoDemasiadoGrande : IOException("El respaldo es demasiado grande")
+
+    /** Al exportar: ni dejando fuera lo que sobra cabe en los límites de importar. */
+    class RespaldoNoCabe : IOException("La biblioteca no cabe en un backup")
 
     private class Instantanea(
         val canciones: List<SongEntity>, val perfiles: List<PerfilRespaldo>,
@@ -113,23 +121,70 @@ class RespaldoRepository @Inject constructor(
             cola = cola,
             perfiles = foto.perfiles
         )
-        val canciones = foto.canciones
-        val playlists = foto.playlists
-        val salida = contexto.contentResolver.openOutputStream(destino, "wt")
-            ?: error("No se pudo abrir el archivo de destino")
-        GZIPOutputStream(salida).bufferedWriter().use { it.write(json.encodeToString(Respaldo.serializer(), respaldo)) }
-        Resumen(canciones.size, playlists.size, ajustes = true, cola = cola != null)
+        var escrito = respaldo
+        // Se decide dentro de `escribir`, antes de que abra el destino: si no cabe,
+        // la copia anterior queda como estaba y no se deja un archivo nuevo vacío.
+        EscrituraRespaldo.escribir(contexto, destino) { salida ->
+            escrito = loQueCabe(respaldo, foto)
+            serializar(escrito, salida)
+        }
+        Resumen(escrito.canciones.size, escrito.playlists.size, ajustes = true, cola = escrito.cola != null)
     }
 
+    // El backup tal cual si cabe en lo que admite importar; si no, sin las canciones
+    // sin uso y con la cola recortada; si ni así, no se exporta.
+    private fun loQueCabe(completo: Respaldo, foto: Instantanea): Respaldo {
+        if (cabe(completo)) return completo
+        val conEstado = completo.perfiles.flatMap { it.historial }.filter { it.tieneEstado() }.map { it.id }.toHashSet()
+        val enPlaylists = completo.playlists.flatMap { it.canciones }.toHashSet()
+        val quedan = RecorteRespaldo.conUso(foto.canciones, conEstado, enPlaylists).map { it.id }.toHashSet()
+        val recortado = completo.copy(
+            canciones = completo.canciones.filter { it.id in quedan },
+            perfiles = completo.perfiles.map { p -> p.copy(historial = p.historial.filter { it.id in quedan }) },
+            cola = completo.cola?.let { c ->
+                val (items, indice) = RecorteRespaldo.alrededorDe(c.items, c.indice, MAX_POR_LISTA)
+                c.copy(items = items, indice = indice)
+            }
+        )
+        return if (cabe(recortado)) recortado else throw RespaldoNoCabe()
+    }
+
+    // Los tamaños se miden escribiendo a un contador: armar el texto entero en memoria
+    // agotaba la de un Galaxy J7 antes de poder avisar. Comprimir solo para medir
+    // cuesta y el JSON encoge: con un texto menor que MAX_ARCHIVO no hace falta.
+    private fun cabe(r: Respaldo): Boolean {
+        if (!cabenLosElementos(r)) return false
+        val texto = medir(r, MAX_TEXTO, comprimido = false) ?: return false
+        return texto <= MAX_ARCHIVO || medir(r, MAX_ARCHIVO, comprimido = true) != null
+    }
+
+    /** Bytes que ocupa [r]; null en cuanto pasa de [maximo]. */
+    private fun medir(r: Respaldo, maximo: Long, comprimido: Boolean): Long? {
+        val contador = Contador(maximo)
+        return try {
+            (if (comprimido) GZIPOutputStream(contador) else contador).use { serializar(r, it) }
+            contador.total
+        } catch (e: Contador.Excedido) { null }
+    }
+
+    @OptIn(ExperimentalSerializationApi::class)
+    private fun serializar(r: Respaldo, salida: OutputStream) =
+        json.encodeToStream(Respaldo.serializer(), r, salida)
+
+    // Los mismos topes al exportar y al importar.
+    private fun cabenLosElementos(r: Respaldo) =
+        r.canciones.size <= MAX_CANCIONES && r.playlists.size <= MAX_PLAYLISTS &&
+            r.playlists.all { it.canciones.size <= MAX_POR_LISTA } &&
+            (r.cola?.items?.size ?: 0) <= MAX_POR_LISTA &&
+            r.perfiles.size <= MAX_PERFILES_ARCHIVO &&
+            r.perfiles.all { it.historial.size <= MAX_CANCIONES }
+
+    private fun HistorialRespaldo.tieneEstado() = isLiked || playCount > 0 || lastPlayed > 0 || noRecomendar
+
     suspend fun importar(origen: Uri): Resumen = withContext(Dispatchers.IO) {
-        val respaldo = json.decodeFromString(Respaldo.serializer(), leerTexto(origen))
+        val respaldo = leer(origen)
         require(respaldo.version <= VERSION_FORMATO) { "Backup de una versión más nueva de ExtMusic" }
-        if (respaldo.canciones.size > MAX_CANCIONES || respaldo.playlists.size > MAX_PLAYLISTS ||
-            respaldo.playlists.any { it.canciones.size > MAX_POR_LISTA } ||
-            (respaldo.cola?.items?.size ?: 0) > MAX_POR_LISTA ||
-            respaldo.perfiles.size > MAX_PERFILES_ARCHIVO ||
-            respaldo.perfiles.any { it.historial.size > MAX_CANCIONES }
-        ) throw RespaldoDemasiadoGrande()
+        if (!cabenLosElementos(respaldo)) throw RespaldoDemasiadoGrande()
 
         val cancionesValidas = respaldo.canciones.filter { idCancionValido(it.id) }.distinctBy { it.id }
         val playlistsValidas = respaldo.playlists.filter { ID_PLAYLIST.matches(it.id) }.distinctBy { it.id }
@@ -249,15 +304,22 @@ class RespaldoRepository @Inject constructor(
 
     // Lee el archivo con topes: comprimido o no, nunca más de MAX_ARCHIVO bytes del
     // disco ni MAX_TEXTO de texto (un "gzip bomba" se corta en vez de llenar la memoria).
-    private fun leerTexto(origen: Uri): String {
+    // Se decodifica según se lee: con el texto entero en una cadena, un Galaxy J7 no
+    // podía restaurar una copia grande que él mismo había exportado.
+    @OptIn(ExperimentalSerializationApi::class)
+    private fun leer(origen: Uri): Respaldo {
         val crudo = contexto.contentResolver.openInputStream(origen) ?: error("No se pudo abrir el archivo")
         crudo.use {
             val entrada = BufferedInputStream(Limitado(it, MAX_ARCHIVO))
             entrada.mark(2)
             val esGzip = entrada.read() == 0x1f && entrada.read() == 0x8b
             entrada.reset()
-            val datos = if (esGzip) GZIPInputStream(entrada) else entrada
-            return Limitado(datos, MAX_TEXTO).bufferedReader().readText()
+            val datos = Limitado(if (esGzip) GZIPInputStream(entrada) else entrada, MAX_TEXTO)
+            val respaldo = json.decodeFromStream(Respaldo.serializer(), datos)
+            // Hasta el final: ahí gzip comprueba su CRC y los topes cuentan todo.
+            val resto = ByteArray(8 * 1024)
+            while (datos.read(resto) >= 0) Unit
+            return respaldo
         }
     }
 
@@ -268,7 +330,12 @@ class RespaldoRepository @Inject constructor(
     private fun SongEntity.conDescargaValida(): SongEntity {
         val descarga = DescargaWorker.archivoDescargado(contexto, localPath)?.takeIf { it.exists() }
         return when {
-            isDownloaded && descarga != null -> copy(origen = OrigenCancion.LOCAL.name, fuente = localPath!!)
+            // Se guarda la ruta como la escribe DescargaWorker, no el texto del archivo
+            // (que podía traer "file://otro/…" o ".." apuntando al mismo sitio).
+            isDownloaded && descarga != null -> {
+                val ruta = "file://" + File(DescargaWorker.carpetaDescargas(contexto), descarga.name).absolutePath
+                copy(localPath = ruta, origen = OrigenCancion.LOCAL.name, fuente = ruta)
+            }
             id.startsWith(PREFIJO_MEDIA) -> copy(
                 isDownloaded = false, localPath = null, downloadQuality = 0,
                 origen = OrigenCancion.LOCAL.name, fuente = id
@@ -350,6 +417,19 @@ class RespaldoRepository @Inject constructor(
 
         fun portadaSegura(url: String): String =
             url.takeIf { (it.startsWith("https://") || it.startsWith(PREFIJO_MEDIA)) && it.length <= 2_000 }.orEmpty()
+    }
+}
+
+/** Descarta lo escrito y solo cuenta; se corta al pasar de [maximo] bytes. */
+private class Contador(private val maximo: Long) : OutputStream() {
+    class Excedido : IOException()
+    var total = 0L
+        private set
+    override fun write(b: Int) = sumar(1)
+    override fun write(b: ByteArray, off: Int, len: Int) = sumar(len)
+    private fun sumar(n: Int) {
+        total += n
+        if (total > maximo) throw Excedido()
     }
 }
 

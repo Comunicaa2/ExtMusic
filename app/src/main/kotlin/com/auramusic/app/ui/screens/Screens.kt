@@ -588,6 +588,10 @@ fun AddToPlaylistDialog(
     var nuevoNombre by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
+        // La ventana se encoge por encima del teclado: si no, tapaba Cancelar y el
+        // final de la lista.
+        modifier = Modifier.safeDrawingPadding(),
+        properties = androidx.compose.ui.window.DialogProperties(decorFitsSystemWindows = false),
         title = { Text(stringResource(R.string.menu_anadir_playlist)) },
         text = {
             Column {
@@ -603,9 +607,13 @@ fun AddToPlaylistDialog(
                 )
                 if (playlists.isNotEmpty()) {
                     Spacer(Modifier.height(8.dp))
-                    playlists.forEach { pl ->
-                        ListItem(headlineContent = { Text(pl.name) },
-                            modifier = Modifier.clickable { onSelect(pl.id) })
+                    // Se desplaza solo la lista, en el alto que quede: el nombre y
+                    // Cancelar no se mueven. Sin esto, de 25 solo se alcanzaban 7.
+                    LazyColumn(Modifier.weight(1f, fill = false)) {
+                        items(playlists, key = { it.id }) { pl ->
+                            ListItem(headlineContent = { Text(pl.name) },
+                                modifier = Modifier.clickable { onSelect(pl.id) })
+                        }
                     }
                 }
             }

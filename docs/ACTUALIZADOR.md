@@ -49,7 +49,7 @@ Se usó una release temporal **depurable** ("1.4.0", versionCode 8) firmada con 
 ## Al publicar una versión
 
 1. Firmar la APK con la clave de siempre y comprobarlo: `apksigner verify --print-certs ExtMusic-X.Y.Z.apk` debe dar `7492411a3df91a2128010740826791eed78f15deba2a962bea2ca6e9e2a3e2a7`.
-2. Subirla con `gh release create vX.Y.Z ExtMusic-X.Y.Z.apk …`. GitHub calcula el `digest` solo.
+2. En GitHub la APK se llama solo `ExtMusic.apk`, sin número de versión. Copiarla con ese nombre a una carpeta temporal y subir la copia: `gh release create vX.Y.Z <carpeta temporal>/ExtMusic.apk …`. GitHub calcula el `digest` solo.
 3. Comprobar que el `digest` de GitHub coincide con el `sha256sum` local: `gh api repos/Comunicaa2/ExtMusic/releases/latest --jq '.assets[]|.digest'`.
 4. Nunca sustituir la APK de una release ya publicada (`--clobber`): quien la estuviera descargando recibiría una huella distinta. Mejor sacar una versión nueva.
 

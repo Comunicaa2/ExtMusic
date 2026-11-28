@@ -508,9 +508,17 @@ class MusicService : MediaSessionService() {
             }.filter { it.localConfiguration != null }
         }.getOrElse { Log.w(TAG, "Cola guardada ilegible: ${it.message.sinUrls()}"); return }
         if (items.isEmpty()) return
-        val indice = colaGuardada.getInt("indice", 0).coerceIn(0, items.lastIndex)
-        player.setMediaItems(items, indice, colaGuardada.getLong("posicion", 0L))
-        Log.d(TAG, "Cola restaurada: ${items.size} canciones, en la ${indice + 1}")
+        val cola = AccesoSesion.filtrarCola(this, items, colaGuardada.getInt("indice", 0),
+            colaGuardada.getLong("posicion", 0L))
+        if (cola.items.size < items.size) {
+            Log.w(TAG, "Cola guardada: ${items.size - cola.items.size} elementos ajenos descartados")
+        }
+        if (cola.items.isEmpty()) {
+            colaGuardada.edit().remove("items").remove("indice").remove("posicion").apply()
+            return
+        }
+        player.setMediaItems(cola.items, cola.indice, cola.posicionMs)
+        Log.d(TAG, "Cola restaurada: ${cola.items.size} canciones, en la ${cola.indice + 1}")
     }
 
     // Con "Ahorro de batería" se pide AAC: el chip de audio de muchos teléfonos no
@@ -680,6 +688,10 @@ class MusicService : MediaSessionService() {
         PlaybackException.ERROR_CODE_TIMEOUT
     )
 
+    // El rechazo va aquí y no en onGetSession, que también usan los botones multimedia.
+    override fun onBind(intent: Intent?): android.os.IBinder? =
+        if (intent?.action == AccesoSesion.ACCION_NAVEGADOR_ANTIGUO) null else super.onBind(intent)
+
     override fun onGetSession(info: MediaSession.ControllerInfo) = mediaSession
 
     // Si el segundo plano está desactivado, al cerrar la app se detiene aunque
@@ -781,10 +793,13 @@ class MusicService : MediaSessionService() {
 
     inner class Callback : MediaSession.Callback {
         override fun onConnect(s: MediaSession, c: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
-            // El servicio está exportado (controles del sistema, relojes, coche): las
-            // apps externas solo reciben los controles normales de reproducción.
-            if (c.packageName != packageName) {
-                return MediaSession.ConnectionResult.AcceptedResultBuilder(s).build()
+            // El servicio está exportado (controles del sistema, relojes, coche): quién
+            // entra y con qué permisos lo decide AccesoSesion.
+            when (AccesoSesion.de(c)) {
+                AccesoSesion.Mando.AJENO -> return MediaSession.ConnectionResult.reject()
+                AccesoSesion.Mando.DE_CONFIANZA -> return MediaSession.ConnectionResult.AcceptedResultBuilder(s)
+                    .setAvailablePlayerCommands(AccesoSesion.comandosDeConfianza()).build()
+                AccesoSesion.Mando.PROPIO -> Unit
             }
             // La propia app: además, los comandos internos (temporizador AA y
             // "siguiente" con reproducción automática).
@@ -797,12 +812,25 @@ class MusicService : MediaSessionService() {
                 comandos, MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS
             )
         }
+        // Segunda defensa: solo la propia app mete canciones en el reproductor, llegue
+        // la petición por donde llegue (onSetMediaItems también pasa por aquí).
+        override fun onAddMediaItems(
+            mediaSession: MediaSession, controller: MediaSession.ControllerInfo,
+            mediaItems: MutableList<MediaItem>
+        ): ListenableFuture<MutableList<MediaItem>> =
+            if (AccesoSesion.de(controller) == AccesoSesion.Mando.PROPIO) {
+                super.onAddMediaItems(mediaSession, controller, mediaItems)
+            } else {
+                com.google.common.util.concurrent.Futures.immediateFailedFuture(
+                    UnsupportedOperationException("Solo ExtMusic puede añadir canciones"))
+            }
+
         override fun onCustomCommand(
             s: MediaSession, c: MediaSession.ControllerInfo,
             cmd: androidx.media3.session.SessionCommand, args: Bundle
         ): com.google.common.util.concurrent.ListenableFuture<androidx.media3.session.SessionResult> {
             // Defensa extra: los comandos internos solo se aceptan de la propia app.
-            if (c.packageName != packageName) {
+            if (AccesoSesion.de(c) != AccesoSesion.Mando.PROPIO) {
                 return com.google.common.util.concurrent.Futures.immediateFuture(
                     androidx.media3.session.SessionResult(androidx.media3.session.SessionError.ERROR_PERMISSION_DENIED)
                 )

@@ -22,6 +22,11 @@ Web: [comunicaa2.github.io/ExtMusic-web](https://comunicaa2.github.io/ExtMusic-w
 - Sin cuenta de Google y sin anuncios.
 - Sin rastreo ni analíticas.
 - La biblioteca (me gusta, playlists, descargas) se guarda solo en el teléfono.
+- Qué sale del teléfono:
+  - **YouTube Music**: las búsquedas y las canciones que escuchas, sin cuenta.
+  - **Letras**: el título, el artista y la duración de la canción se envían a [LRCLIB](https://lrclib.net) y, si allí no está, a KuGou.
+  - **Actualizaciones** (solo la versión de GitHub): como mucho una vez al día, la app pregunta a GitHub cuál es la última versión. Se puede desactivar en Ajustes ▸ Buscar al abrir la app. La versión nueva solo se descarga de GitHub si tú lo pides.
+  - Como en cualquier conexión, esos servicios ven la dirección IP del teléfono.
 
 ## Requisitos
 

@@ -1,7 +1,10 @@
 package com.auramusic.app.ui.components
 
 import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Modifier
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
@@ -76,21 +79,26 @@ fun MenuCancion(cancion: SongEntity, playerViewModel: PlayerViewModel, navContro
             val prog = descargas[cancion.id]
             val descargando = prog?.status == DownloadStatus.DOWNLOADING || prog?.status == DownloadStatus.PENDING
             val delTelefono = cancion.origen == OrigenCancion.LOCAL.name && !descargada
+            val fallos by downloadVm.fallos.collectAsStateWithLifecycle()
+            val fallo = fallos[cancion.id]?.takeIf { !descargando && !descargada }
             if (!delTelefono) DropdownMenuItem(
                 text = {
-                    Text(when {
+                    if (fallo != null) TextoReintentarDescarga(fallo)
+                    else Text(when {
                         descargando -> stringResource(R.string.desc_descargando, prog?.progress ?: 0)
                         descargada  -> stringResource(R.string.desc_eliminar)
                         else        -> stringResource(R.string.accion_descargar)
                     })
                 },
                 leadingIcon = {
-                    Icon(when {
+                    if (fallo != null) IconoReintentarDescarga()
+                    else Icon(when {
                         descargando -> Icons.Default.Downloading
                         descargada  -> Icons.Default.DeleteOutline
                         else        -> Icons.Default.Download
                     }, null)
                 },
+                modifier = if (fallo != null) Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)) else Modifier,
                 enabled = !descargando,
                 onClick = {
                     abierto = false

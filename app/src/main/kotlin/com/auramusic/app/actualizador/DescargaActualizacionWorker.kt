@@ -45,6 +45,11 @@ class DescargaActualizacionWorker(
         carpeta.listFiles()?.forEach { it.delete() }
         val parcial = File(carpeta, "ExtMusic-$version.apk.part")
         val final = archivoApk(applicationContext, version)
+        // Con la descarga vieja ya borrada: si no cabe, decirlo (antes salía como "sin conexión").
+        if (carpeta.usableSpace < tamano + MARGEN_ESPACIO) {
+            Log.w(TAG, "Sin espacio para la descarga")
+            return Result.failure(fallo(ErrorActualizacion.ESPACIO))
+        }
 
         var terminado = false
         try {
@@ -91,8 +96,9 @@ class DescargaActualizacionWorker(
             avisarLista(version)
             return Result.success()
         } catch (e: IOException) {
-            Log.w(TAG, "Descarga fallida: ${e.javaClass.simpleName}")
-            return Result.failure(fallo(ErrorActualizacion.RED))
+            val espacio = com.auramusic.app.work.esFaltaDeEspacio(e)
+            Log.w(TAG, "Descarga fallida: ${e.javaClass.simpleName}${if (espacio) " (sin espacio)" else ""}")
+            return Result.failure(fallo(if (espacio) ErrorActualizacion.ESPACIO else ErrorActualizacion.RED))
         } finally {
             // Cancelada, fallida o dañada: no queda nada a medias.
             if (!terminado) parcial.delete()
@@ -140,6 +146,8 @@ class DescargaActualizacionWorker(
         const val EXTRA_ABRIR = "abrir_actualizacion"
         private const val CANAL = "actualizaciones"
         const val ID_NOTIFICACION = 7_401
+        /** Holgura sobre el tamaño de la APK: el sistema también necesita algo para escribir. */
+        private const val MARGEN_ESPACIO = 2L * 1024 * 1024
 
         fun carpeta(ctx: Context): File = File(ctx.filesDir, "actualizacion").also { it.mkdirs() }
         fun archivoApk(ctx: Context, version: String): File = File(carpeta(ctx), "ExtMusic-$version.apk")

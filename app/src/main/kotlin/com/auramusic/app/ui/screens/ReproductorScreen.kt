@@ -456,21 +456,26 @@ private fun MenuReproductor(
     val descargando = prog?.status == DownloadStatus.DOWNLOADING ||
         prog?.status == DownloadStatus.PENDING
     val delTelefono = song?.origen == OrigenCancion.LOCAL.name && !estaDescargada
+    val fallos by downloadVm.fallos.collectAsStateWithLifecycle()
+    val fallo = sid?.let { fallos[it] }?.takeIf { !descargando && !estaDescargada }
     if (song != null && !delTelefono) DropdownMenuItem(
         text = {
-            Text(when {
+            if (fallo != null) com.auramusic.app.ui.components.TextoReintentarDescarga(fallo)
+            else Text(when {
                 descargando    -> stringResource(R.string.desc_descargando, prog?.progress ?: 0)
                 estaDescargada -> stringResource(R.string.desc_eliminar)
                 else           -> stringResource(R.string.accion_descargar)
             })
         },
         leadingIcon = {
-            Icon(when {
+            if (fallo != null) com.auramusic.app.ui.components.IconoReintentarDescarga()
+            else Icon(when {
                 descargando    -> Icons.Default.Downloading
                 estaDescargada -> Icons.Default.DeleteOutline
                 else           -> Icons.Default.Download
             }, null)
         },
+        modifier = if (fallo != null) Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)) else Modifier,
         enabled = !descargando,
         onClick = {
             onCerrar()

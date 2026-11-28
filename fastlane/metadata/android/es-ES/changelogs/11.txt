@@ -1,0 +1,8 @@
+• Nuevo: si una descarga falla, te avisa y puedes reintentarla desde el menú ⋮
+• Te avisa cuando falta espacio, también al actualizar la app
+• Exportar un backup ya no puede borrar el anterior
+• Los backups muy grandes ya se pueden restaurar
+• Arreglo: el Inicio ya no se cierra
+• Arreglo: los perfiles ya no mezclan sus recomendaciones
+• «Añadir a playlist» muestra todas tus listas
+• Más seguridad: otras apps ya no pueden meter canciones en tu cola

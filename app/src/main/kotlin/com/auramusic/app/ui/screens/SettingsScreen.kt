@@ -72,9 +72,14 @@ fun SettingsScreen(navController: NavController) {
     val msgExportado = stringResource(R.string.respaldo_exportado)
     val msgError = stringResource(R.string.respaldo_error)
     val msgGrande = stringResource(R.string.respaldo_grande)
+    val msgNoCabe = stringResource(R.string.respaldo_no_cabe)
     val avisar: (String) -> Unit = { m -> scope.launch { snackbar.showSnackbar(m) } }
     val avisarFallo: (Throwable) -> Unit = { e ->
-        avisar(if (e is RespaldoRepository.RespaldoDemasiadoGrande) msgGrande else msgError)
+        avisar(when (e) {
+            is RespaldoRepository.RespaldoDemasiadoGrande -> msgGrande
+            is RespaldoRepository.RespaldoNoCabe -> msgNoCabe
+            else -> msgError
+        })
     }
     var resumenImportado by remember { mutableStateOf<RespaldoRepository.Resumen?>(null) }
     val pickerExportar = rememberLauncherForActivityResult(

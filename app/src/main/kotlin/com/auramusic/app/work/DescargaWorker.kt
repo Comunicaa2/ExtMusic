@@ -42,8 +42,17 @@ class DescargaWorker @AssistedInject constructor(
     @Assisted params: WorkerParameters,
     private val innertube: InnertubeClient,
     private val songDao: SongDao,
-    private val repositorioPreferencias: RepositorioPreferencias
+    private val repositorioPreferencias: RepositorioPreferencias,
+    private val fallos: RegistroFallosDescarga
 ) : CoroutineWorker(appContext, params) {
+
+    /** Anota el fallo (menú ⋮ y aviso) y termina. Sin direcciones en el registro. */
+    private fun fallar(videoId: String, nombre: String, causa: Throwable?): Result {
+        val motivo = if (esFaltaDeEspacio(causa)) MotivoFallo.ESPACIO else MotivoFallo.OTRO
+        android.util.Log.w("DescargaWorker", "Descarga fallida: ${causa?.javaClass?.simpleName ?: "sin URL"} ($motivo)")
+        fallos.marcar(videoId, nombre, motivo)
+        return Result.failure()
+    }
 
     override suspend fun doWork(): Result {
         val videoId = inputData.getString(KEY_VIDEO_ID) ?: return Result.failure()
@@ -60,7 +69,7 @@ class DescargaWorker @AssistedInject constructor(
         // El códec y el formato salen de la calidad (AudioQuality.codec), así un
         // .m4a es AAC y un .opus es Opus.
         val audioInfo = innertube.getAudioUrl(videoId, calidad, calidad.codec)
-            ?: return Result.failure()
+            ?: return fallar(videoId, title.ifBlank { videoId }, null)
 
         // 2) Destino: caché interna privada filesDir/downloads (no visible al usuario).
         val dir = carpetaDescargas(applicationContext)
@@ -113,6 +122,8 @@ class DescargaWorker @AssistedInject constructor(
                         if (total < 0) total = resp.header("Content-Range")
                             ?.substringAfterLast('/')?.toLongOrNull()
                             ?: (resp.body?.contentLength() ?: -1L).takeIf { resp.code == 200 } ?: -1L
+                        // Al saber el tamaño, antes de escribir: si no cabe, no se intenta.
+                        if (hechos == 0L && total > 0 && dir.usableSpace < total + MARGEN_ESPACIO) throw SinEspacio()
                         var n = 0L
                         resp.body?.byteStream()?.use { n = it.copyTo(out) }
                         n
@@ -141,10 +152,15 @@ class DescargaWorker @AssistedInject constructor(
             // ni más (bytes pegados de otra respuesta).
             if (total > 0 && hechos != total) throw IOException("Tamaño $hechos, se esperaba $total")
             if (!archivoParcial.renameTo(archivoAudio)) throw IOException("No se pudo guardar $archivoAudio")
+        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+            // Cancelada (por el usuario o por WorkManager): no es un error ni se anota.
+            archivoParcial.delete()
+            nm.cancel(notifId)
+            throw e
         } catch (e: Exception) {
             archivoParcial.delete()   // no dejar un archivo a medias que parezca válido
             nm.cancel(notifId)
-            return Result.failure()
+            return fallar(videoId, nombre, e)
         }
 
         // Notificación final "Descarga completada".
@@ -175,7 +191,7 @@ class DescargaWorker @AssistedInject constructor(
         // Preserva la fila existente (like, conteos, explicit…) si ya estaba en BD;
         // así descargar al dar me gusta (P) no des-marca el like.
         val rutaGuardada = "file://${archivoAudio.absolutePath}"
-        val previa = songDao.getById(videoId)
+        val previa = kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { songDao.getById(videoId) }
         val cancion = previa?.copy(
             isDownloaded = true, localPath = rutaGuardada, downloadQuality = audioInfo.bitrate,
             origen = OrigenCancion.LOCAL.name, fuente = rutaGuardada,
@@ -186,7 +202,10 @@ class DescargaWorker @AssistedInject constructor(
             isDownloaded = true, localPath = rutaGuardada, downloadQuality = audioInfo.bitrate,
             origen = OrigenCancion.LOCAL.name, fuente = rutaGuardada
         )
-        songDao.upsert(cancion)
+        // El audio ya está entero en su sitio: se anota aunque llegue una cancelación (si no,
+        // quedaba un archivo que ocupa espacio sin que la app lo diera por descargado).
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { songDao.upsert(cancion) }
+        fallos.quitar(videoId)
         return Result.success()
     }
 
@@ -217,6 +236,8 @@ class DescargaWorker @AssistedInject constructor(
 
     companion object {
         private const val CANAL_DESCARGAS = "descargas"
+        /** Holgura sobre el tamaño de la canción al comprobar el espacio. */
+        private const val MARGEN_ESPACIO = 2L * 1024 * 1024
         const val KEY_VIDEO_ID = "videoId"
         const val KEY_TITLE = "title"
         const val KEY_ARTIST = "artist"

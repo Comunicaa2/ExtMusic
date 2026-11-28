@@ -148,6 +148,7 @@
     <string name="respaldo_importado">Canciones: %1$d · Playlists: %2$d</string>
     <string name="respaldo_error">No se pudo completar el backup</string>
     <string name="respaldo_grande">El backup es demasiado grande para importarlo</string>
+    <string name="respaldo_no_cabe">No se exportó: tu biblioteca supera el tamaño máximo de un backup</string>
     <string name="respaldo_importado_titulo">Backup importado</string>
     <string name="respaldo_importado_ajustes">Ajustes restaurados. Si usabas una carpeta de descargas o de música, vuelve a elegirla.</string>
     <string name="respaldo_importado_cola">Cola restaurada: ya está en el reproductor.</string>
@@ -341,6 +342,17 @@
     <string name="desc_eliminar">Eliminar descarga</string>
     <string name="desc_descargando">Descargando… %1$d%%</string>
     <string name="desc_notif_completada">Descarga completada</string>
+    <string name="desc_canal_fallos">Descargas fallidas</string>
+    <string name="desc_reintentar">Reintentar descarga</string>
+    <string name="desc_fallo_espacio">No hay espacio en el teléfono</string>
+    <string name="desc_fallo_otro">La última descarga falló</string>
+    <string name="desc_notif_fallo">No se pudo descargar</string>
+    <string name="desc_notif_fallos">No se pudieron descargar %1$d canciones</string>
+    <string name="desc_notif_menu">Reinténtalo desde su menú ⋮</string>
+    <string name="desc_aviso_fallo_espacio">No se pudo descargar «%1$s»: no hay espacio</string>
+    <string name="desc_aviso_fallo">No se pudo descargar «%1$s»</string>
+    <string name="desc_aviso_fallos_espacio">No se pudieron descargar %1$d canciones: no hay espacio</string>
+    <string name="desc_aviso_fallos">No se pudieron descargar %1$d canciones</string>
     <string name="artista_desconocido">Desconocido</string>
     <string name="cancion_sin_titulo">Sin título</string>
 
@@ -403,6 +415,7 @@
     <string name="act_lista_fila">%1$s lista para instalar · toca para instalar</string>
     <string name="act_err_red">No se pudo comprobar: sin conexión</string>
     <string name="act_err_red_descarga">No se pudo descargar: sin conexión. Toca para reintentar.</string>
+    <string name="act_err_espacio">No se pudo descargar: no hay espacio. Libera algo y toca para reintentar.</string>
     <string name="act_err_limite">GitHub pide esperar. Se vuelve a intentar mañana.</string>
     <string name="act_err_catalogo">La versión publicada no trae lo necesario. Se vuelve a intentar mañana.</string>
     <string name="act_err_danada">La descarga no coincidía con la publicada y se borró. Toca para reintentar.</string>

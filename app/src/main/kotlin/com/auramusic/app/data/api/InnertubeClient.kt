@@ -202,7 +202,8 @@ class InnertubeClient @Inject constructor() {
                 if (populares.isEmpty()) {
                     populares = shelf["contents"]?.jsonArray.orEmpty().mapNotNull { f ->
                         f.jsonObject["musicResponsiveListItemRenderer"]?.jsonObject?.let(::filaCancion)
-                    }.filter { it.isSong }.map { if (it.artistId.isBlank()) it.copy(artistId = browseId) else it }
+                    }.filter { it.isSong }.distinctBy { it.videoId }   // clave de la lista en pantalla
+                        .map { if (it.artistId.isBlank()) it.copy(artistId = browseId) else it }
                     todas = destino(shelf["title"]?.jsonObject?.get("runs")?.jsonArray?.firstOrNull()?.jsonObject
                         ?.get("navigationEndpoint")).second
                         ?: destino(shelf["bottomEndpoint"]).second
@@ -249,7 +250,7 @@ class InnertubeClient @Inject constructor() {
                     ?.lastOrNull()?.jsonObject?.get("url")?.jsonPrimitive?.content.orEmpty()
             )
         }
-        return if (items.isEmpty()) null else SeccionArtista(titulo, items)
+        return if (items.isEmpty()) null else SeccionArtista(titulo, items.distinctBy { it.browseId })
     }
 
     // Botón de la cabecera (Aleatorio / Mix) → la cola de YT Music que abre.

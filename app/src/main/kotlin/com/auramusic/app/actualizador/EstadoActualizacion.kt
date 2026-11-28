@@ -16,6 +16,8 @@ sealed interface EstadoActualizacion {
 enum class ErrorActualizacion {
     /** Sin conexión o GitHub no respondió. */
     RED,
+    /** No cabe en el teléfono (antes de bajar o al escribir). */
+    ESPACIO,
     /** GitHub pidió esperar (403/429). */
     LIMITE,
     /** La release no tiene lo necesario (APK, tamaño, huella). */

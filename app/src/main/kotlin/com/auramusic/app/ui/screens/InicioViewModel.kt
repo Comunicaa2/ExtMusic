@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -151,6 +152,7 @@ class InicioViewModel @Inject constructor(
             perfilDao.activo().map { it?.id }.distinctUntilChanged().collectLatest { perfil ->
                 trabajo?.cancel()
                 perfilActual = perfil
+                artistas = emptyList()   // los del perfil anterior no valen para este
                 variacion.value = 0
                 val g = guardado(perfil)
                 _estado.update { Estado(secciones = g.orEmpty()) }
@@ -158,7 +160,11 @@ class InicioViewModel @Inject constructor(
                 // Cada canción que suena cambia el historial, pero el Inicio solo se rehace
                 // cuando cambian tus artistas (o su orden), y solo pide a YT Music las
                 // páginas que no tiene (ver paginasVistas).
-                songDao.escuchasPorArtista().map { tusArtistas(it) }.distinctUntilChanged().flowOn(Dispatchers.Default).collect { a ->
+                // Al cambiar de perfil, el historial nuevo puede llegar antes que el aviso
+                // de activo(): sin el filtro se armaba con él el Inicio y se guardaba en
+                // el perfil anterior.
+                songDao.escuchasPorArtista().filter { perfilDao.activoId() == perfil }
+                    .map { tusArtistas(it) }.distinctUntilChanged().flowOn(Dispatchers.Default).collect { a ->
                     artistas = a
                     armar()
                 }
@@ -198,7 +204,8 @@ class InicioViewModel @Inject constructor(
             // Sin nada que pedir, no se muestra "cargando" (si no, parpadeaba en cada canción).
             if (forzar || !lista.all { vigente(paginasVistas[it]) }) _estado.update { it.copy(cargando = true, aviso = null) }
             val paginas = coroutineScope { lista.map { a -> async { pagina(a, forzar) } }.awaitAll() }
-            val listas = paginas.mapNotNull { it?.getOrNull() }
+            // Dos nombres pueden llevar a la misma página (uno sin id, hallado por nombre).
+            val listas = paginas.mapNotNull { it?.getOrNull() }.distinctBy { it.browseId }
             if (listas.isEmpty()) {
                 val sinRed = paginas.any { it?.exceptionOrNull() is java.io.IOException }
                 Log.w(TAG, "Sin páginas de artista (sin red: $sinRed)")
@@ -251,6 +258,7 @@ class InicioViewModel @Inject constructor(
         if (novedades.isNotEmpty()) secciones += SeccionInicio(contexto.getString(R.string.home_novedades), colecciones = novedades)
 
         val mixes = paginas.mapNotNull { p -> p.mix?.let { MixInicio(p.nombre, p.fotoUrl, it.playlistId, it.params) } }
+            .distinctBy { it.playlistId }   // es la clave del carrusel: repetida, la app se cierra
         if (mixes.isNotEmpty()) secciones += SeccionInicio(contexto.getString(R.string.home_mixes), mixes = mixes)
 
         // Artistas parecidos a los dos primeros que no escuchas ya.
@@ -283,6 +291,9 @@ class InicioViewModel @Inject constructor(
 
     private suspend fun guardado(perfil: String?): List<SeccionInicio>? = withContext(Dispatchers.IO) {
         runCatching { json.decodeFromString(serializador, archivo(perfil).readText()) }.getOrNull()
+            // Hasta la 1.4.2 se podía guardar un mix repetido, y el Inicio se cerraba
+            // en cada apertura, también sin red.
+            ?.map { s -> s.copy(mixes = s.mixes.distinctBy { it.playlistId }) }
     }
 
     private suspend fun guardar(perfil: String?, s: List<SeccionInicio>) = withContext(Dispatchers.IO) {
@@ -326,7 +337,8 @@ private fun tusArtistas(historial: List<EscuchaArtista>): List<ArtistaTuyo> {
         ArtistaTuyo(extractMainArtist(canciones.first().artist),
             canciones.map { it.artistId }.filter { it.isNotBlank() }
                 .groupingBy { it }.eachCount().maxByOrNull { it.value }?.key)
-    }
+    // "J Balvin" y "J. Balvin" son el mismo artista si comparten id de YT Music.
+    }.distinctBy { it.id ?: it.nombre.lowercase() }
 }
 
 /**

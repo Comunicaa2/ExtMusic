@@ -1,0 +1,8 @@
+• New: if a download fails, you're told and can retry it from the ⋮ menu
+• Tells you when you're out of space, also when updating the app
+• Exporting a backup can no longer erase the previous one
+• Very large backups can now be restored
+• Fix: Home no longer crashes
+• Fix: profiles no longer mix their recommendations
+• "Add to playlist" shows all your playlists
+• Safer: other apps can no longer add songs to your queue
